@@ -23,6 +23,8 @@ import type { LiteDocument } from "npm:mathjax-full/js/adaptors/lite/Document.js
 import type { LiteText } from "npm:mathjax-full/js/adaptors/lite/Text.js";
 import "npm:mathjax-full/js/input/tex/AllPackages.js";
 
+import { MarkupContent, MarkupKind } from "npm:vscode-languageserver-types";
+
 import { Buffer } from "https://deno.land/std@0.166.0/node/buffer.ts";
 
 const baseExtensions: SupportedExtension[] = [
@@ -65,7 +67,7 @@ export function mathjaxLoadedExtensions() {
   return loadedExtensions as string[];
 }
 
-export function mathjaxTypesetToMarkdown(tex: string) {
+export function mathjaxTypesetToMarkdown(tex: string): MarkupContent | null {
   // remove crossref if necessary
   tex = tex.replace(/\$\$\s+\{#eq[\w\-]+\}\s*$/, "");
 
@@ -77,13 +79,13 @@ export function mathjaxTypesetToMarkdown(tex: string) {
     const svg = typesetToSvg(tex, typesetOpts);
     const md = svgToDataUrl(svg);
     return {
-      kind: "markdown",
+      kind: MarkupKind.Markdown,
       value: `![equation](${md})`,
     };
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
     return {
-      kind: "markdown",
+      kind: MarkupKind.Markdown,
       value: "**LaTeX Error**:\n" + message || "Unknown error",
     };
   }

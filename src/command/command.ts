@@ -28,6 +28,7 @@ import { useCommand } from "./use/cmd.ts";
 import { addCommand } from "./add/cmd.ts";
 import { uninstallCommand } from "./uninstall/cmd.ts";
 import { createCommand } from "./create/cmd.ts";
+import { lspCommand } from "./lsp/cmd.ts";
 
 // deno-lint-ignore no-explicit-any
 export function commands(): Command<any>[] {
@@ -50,6 +51,7 @@ export function commands(): Command<any>[] {
     useCommand,
     publishCommand,
     capabilitiesCommand,
+    lspCommand,
     inspectCommand,
     toolsCommand,
     checkCommand,

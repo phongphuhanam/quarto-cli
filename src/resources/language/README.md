@@ -33,6 +33,10 @@ lang: fr
 ---
 ```
 
+## A Note on Gender for the Author-based Values
+
+The `title-block-author-single` and `title-block-author-plural` keys refer to a hypothetical author or set of authors and the word "author" can have different masculine and feminine forms across locales. We endeavor to follow the relevant guidance put forward by the Unicode Consortium in Unicode Technical Standard #35 (https://www.unicode.org/reports/tr35/tr35-45/tr35-general.html#List_Gender). This involves having the forms for male-singular, female-singular, male-plural, female-plural, and mixed-neutral. The cross-locale data that supports this guidance can be found within the (cldr-json GitHub project)[https://github.com/unicode-org/cldr-json/blob/main/cldr-json/cldr-core/supplemental/gender.json]. The CLDR (Common Locale Data Repository) project is a Unicode project that is the going standard for localization. While the data is currently in an emergent state, it should eventually cover the bulk of the locales that CLDR supports (and Quarto as well) and it promises to be continuously maintained in a consensus-based manner.
+
 ## Contributing Localizations
 
 We welcome contributions of additional languages! To contribute a localization:

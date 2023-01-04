@@ -13,7 +13,9 @@ import { Configuration, readConfiguration } from "../common/config.ts";
 export const kLogLevel = "logLevel";
 export const kVersion = "setVersion";
 
-export function packageCommand(run: (config: Configuration) => Promise<void>) {
+export function packageCommand(
+  run: (config: Configuration, args?: Record<string, unknown>) => Promise<void>,
+) {
   return new Command().option(
     "-sv, --set-version [version:string]",
     "Version to set when preparing this distribution",
@@ -35,6 +37,6 @@ export function packageCommand(run: (config: Configuration) => Promise<void>) {
     // Run the command
     info("Using configuration:");
     info(config);
-    await run(config);
+    await run(config, args);
   });
 }

@@ -87,6 +87,10 @@ function getCommands() {
   );
   commands.push(
     packageCommand(makeInstallerDeb)
+      .option(
+        "-a, --arch [arch:string]",
+        "The architecture for which to create an installer.",
+      )
       .name("make-installer-deb")
       .description("Builds Linux deb installer"),
   );

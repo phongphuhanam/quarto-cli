@@ -45,7 +45,7 @@ export async function configure(
   // Download dependencies
   for (const dependency of kDependencies) {
     try {
-      await configureDependency(dependency, config);
+      await configureDependency(dependency, config.directoryInfo.bin);
     } catch (e) {
       if (
         e.message ===

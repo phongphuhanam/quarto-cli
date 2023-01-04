@@ -57,7 +57,10 @@ export function updatePandoc() {
         await archiveBinaryDependency(pandocDependency, workingDir);
 
         // Configure this version of pandoc
-        await configureDependency(pandocDependency, configuration);
+        await configureDependency(
+          pandocDependency,
+          configuration.directoryInfo.bin,
+        );
 
         // Generate templates
         await writePandocTemplates(configuration, version, workingDir);

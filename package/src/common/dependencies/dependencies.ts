@@ -7,7 +7,6 @@
 
 import { join } from "path/mod.ts";
 import { info } from "log/mod.ts";
-import { Configuration } from "../config.ts";
 
 import { dartSass } from "./dartsass.ts";
 import { deno_dom } from "./deno_dom.ts";
@@ -37,9 +36,9 @@ export interface Dependency {
 // Defines the specific Platform dependencies for
 // a given architecture
 export interface ArchitectureDependency {
-  "darwin": PlatformDependency;
-  "linux": PlatformDependency;
-  "windows": PlatformDependency;
+  "darwin"?: PlatformDependency;
+  "linux"?: PlatformDependency;
+  "windows"?: PlatformDependency;
 }
 
 // Defines an individual binary dependency, specific
@@ -61,10 +60,11 @@ function version(env: string) {
 
 export async function configureDependency(
   dependency: Dependency,
-  config: Configuration,
+  directory: string,
+  arch: string = Deno.build.arch,
 ) {
   info(`Preparing ${dependency.name}`);
-  let archDep = dependency.architectureDependencies[Deno.build.arch];
+  let archDep = dependency.architectureDependencies[arch];
 
   // If we're missing some arm64, try the intel versions and rely on rosetta.
   if (!archDep && Deno.build.arch === "aarch64") {
@@ -72,47 +72,53 @@ export async function configureDependency(
   }
   if (archDep) {
     const platformDep = archDep[Deno.build.os];
-    const vendor = Deno.env.get("QUARTO_VENDOR_BINARIES");
-    let targetFile = "";
-    if (vendor === undefined || vendor === "true") {
-      info(`Downloading ${dependency.name}`);
+    if (platformDep) {
+      const vendor = Deno.env.get("QUARTO_VENDOR_BINARIES");
+      let targetFile = "";
+      if (vendor === undefined || vendor === "true") {
+        info(`Downloading ${dependency.name}`);
 
-      try {
-        targetFile = await downloadBinaryDependency(
-          dependency,
-          platformDep,
-          config,
-        );
-      } catch (error) {
-        const msg =
-          `Failed to Download ${dependency.name}\nAre you sure that version ${dependency.version} of ${dependency.bucket} has been archived using './quarto-bld archive-bin-deps'?\n${error.message}`;
-        throw new Error(msg);
+        try {
+          targetFile = await downloadBinaryDependency(
+            dependency,
+            platformDep,
+            directory,
+          );
+        } catch (error) {
+          const msg =
+            `Failed to Download ${dependency.name}\nAre you sure that version ${dependency.version} of ${dependency.bucket} has been archived using './quarto-bld archive-bin-deps'?\n${error.message}`;
+          throw new Error(msg);
+        }
       }
-    }
 
-    info(`Configuring ${dependency.name}`);
-    await platformDep.configure(targetFile);
+      info(`Configuring ${dependency.name}`);
+      await platformDep.configure(targetFile);
 
-    if (targetFile) {
-      info(`Cleaning up`);
-      Deno.removeSync(targetFile);
+      if (targetFile) {
+        info(`Cleaning up`);
+        Deno.removeSync(targetFile);
+      }
+    } else {
+      throw new Error(
+        `The architecture ${arch} is missing the OS ${Deno.build.os} in the dependency ${dependency.name}`,
+      );
     }
   } else {
     throw new Error(
-      `The architecture ${Deno.build.arch} is missing the dependency ${dependency.name}`,
+      `The architecture ${arch} is missing the dependency ${dependency.name}`,
     );
   }
 
   info(`${dependency.name} complete.\n`);
 }
 
-async function downloadBinaryDependency(
+export async function downloadBinaryDependency(
   dependency: Dependency,
   platformDependency: PlatformDependency,
-  configuration: Configuration,
+  directory: string,
 ) {
   const targetFile = join(
-    configuration.directoryInfo.bin,
+    directory,
     "tools",
     platformDependency.filename,
   );

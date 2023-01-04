@@ -11,9 +11,14 @@ import { error, info } from "log/mod.ts";
 
 import { Configuration } from "../common/config.ts";
 import { runCmd } from "../util/cmd.ts";
+import {
+  configureDependency,
+  kDependencies,
+} from "../common/dependencies/dependencies.ts";
 
 export async function makeInstallerDeb(
   configuration: Configuration,
+  args: Record<string, unknown>,
 ) {
   info("Building deb package...");
 
@@ -25,6 +30,11 @@ export async function makeInstallerDeb(
     error("Can't detect package architecture.");
     throw new Error("Undetectable architecture. Packaging failed.");
   }
+
+  // detect requested machine architecture
+  const archArg = args["arch"];
+  const installerArch = archArg ? archArg as string : architecture;
+
   const packageName =
     `quarto-${configuration.version}-linux-${architecture}.deb`;
   info("Building package " + packageName);
@@ -46,6 +56,18 @@ export async function makeInstallerDeb(
   copySync(configuration.directoryInfo.bin, workingBinPath, {
     overwrite: true,
   });
+
+  // Move the correct architecture files into place
+  if (installerArch !== architecture) {
+    for (const dependency of kDependencies) {
+      info(`Replacing ${dependency.name} in ${workingBinPath}`);
+      await configureDependency(dependency, workingBinPath, installerArch);
+    }
+
+    console.log("Building other architecture");
+    console.log(installerArch);
+    console.log(architecture);
+  }
 
   const workingSharePath = join(
     workingDir,
@@ -78,7 +100,7 @@ export async function makeInstallerDeb(
   let control = "";
   control = control + val("Package", configuration.productName);
   control = control + val("Version", configuration.version);
-  control = control + val("Architecture", architecture);
+  control = control + val("Architecture", installerArch);
   control = control + val("Installed-Size", `${Math.round(size / 1024)}`);
   control = control + val("Section", "user/text");
   control = control + val("Priority", "optional");

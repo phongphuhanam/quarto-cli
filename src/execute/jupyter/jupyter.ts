@@ -351,6 +351,7 @@ export const jupyterEngine: ExecutionEngine = {
     // return results
     return {
       markdown: markdown,
+      messages: [],
       supporting: [join(assets.base_dir, assets.supporting_dir)],
       filters: [],
       pandoc: result.pandoc,

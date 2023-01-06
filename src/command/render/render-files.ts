@@ -434,6 +434,8 @@ export async function renderFiles(
               executeOptions,
             );
 
+            // process messages from execute
+
             // recover source map from diff and create a mappedExecuteResult
             // for markdown processing pre-pandoc with mapped strings
             let mappedMarkdown: MappedString;

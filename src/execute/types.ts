@@ -84,9 +84,7 @@ export interface ExecuteOptions {
   handledLanguages: string[]; // list of languages handled by cell language handlers, after the execution engine
 }
 
-// result of execution
-export interface ExecuteResult {
-  markdown: string;
+interface BaseExecuteResult {
   supporting: string[];
   filters: string[];
   metadata?: Metadata;
@@ -96,20 +94,17 @@ export interface ExecuteResult {
   preserve?: Record<string, string>;
   postProcess?: boolean;
   resourceFiles?: string[];
+  messages: unknown[]; // messages from execution engine
+}
+
+// result of execution
+export interface ExecuteResult extends BaseExecuteResult {
+  markdown: string;
 }
 
 // result of execution after restoring source map
-export interface MappedExecuteResult {
+export interface MappedExecuteResult extends BaseExecuteResult {
   markdown: MappedString;
-  supporting: string[];
-  filters: string[];
-  metadata?: Metadata;
-  pandoc?: FormatPandoc;
-  includes?: PandocIncludes;
-  engineDependencies?: Record<string, Array<unknown>>;
-  preserve?: Record<string, string>;
-  postProcess?: boolean;
-  resourceFiles?: string[];
 }
 
 export interface PandocIncludes {

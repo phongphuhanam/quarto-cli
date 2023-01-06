@@ -204,6 +204,12 @@ async function callR<T>(
     { dir: tempDir, prefix: "r-results", suffix: ".json" },
   );
 
+  // create a temp file for communication with the computational cells
+  const messagesFile = Deno.makeTempFileSync(
+    { dir: tempDir, prefix: "r-messages", suffix: ".json" },
+  );
+  Deno.env.set("QUARTO_MESSAGES_FILE", messagesFile);
+
   const input = JSON.stringify({
     action,
     params,
@@ -211,50 +217,71 @@ async function callR<T>(
   });
 
   try {
-    const result = await execProcess(
-      {
-        cmd: [
-          await rBinaryPath("Rscript"),
-          resourcePath("rmd/rmd.R"),
-        ],
-        cwd,
-        stderr: quiet ? "piped" : "inherit",
-      },
-      input,
-      "stdout>stderr",
-      (output) => {
-        if (outputFilter) {
-          output = outputFilter(output);
-        }
-        return colors.red(output);
-      },
-    );
+    try {
+      const result = await execProcess(
+        {
+          cmd: [
+            await rBinaryPath("Rscript"),
+            resourcePath("rmd/rmd.R"),
+          ],
+          cwd,
+          stderr: quiet ? "piped" : "inherit",
+        },
+        input,
+        "stdout>stderr",
+        (output) => {
+          if (outputFilter) {
+            output = outputFilter(output);
+          }
+          return colors.red(output);
+        },
+      );
 
-    if (result.success) {
-      const results = await Deno.readTextFile(resultsFile);
-      await Deno.remove(resultsFile);
-      const resultsJson = JSON.parse(results);
-      return resultsJson as T;
-    } else {
-      // quiet means don't print in normal cases, but
-      // we still need to report errors
-      if (quiet) {
-        error(result.stderr || "");
+      if (result.success) {
+        const messages: unknown[] = [];
+        try {
+          const messageStr = Deno.readTextFileSync(messagesFile);
+          if (messageStr !== "") {
+            messages.push(
+              ...messageStr.trim().split("\n").map((
+                line,
+              ) => JSON.parse(line)),
+            );
+          }
+        } catch (e) {
+          error(`Error reading messages from engine: ${e.message}`);
+          return Promise.reject();
+        }
+        const results = await Deno.readTextFile(resultsFile);
+        await Deno.remove(resultsFile);
+        const resultsJson = JSON.parse(results);
+        resultsJson.messages = messages;
+        console.log({ resultsJson });
+        return resultsJson as T;
+      } else {
+        // quiet means don't print in normal cases, but
+        // we still need to report errors
+        if (quiet) {
+          error(result.stderr || "");
+        }
+        if (reportError) {
+          await printCallRDiagnostics();
+        }
+        return Promise.reject();
       }
+    } catch (e) {
       if (reportError) {
+        if (e?.message) {
+          info("");
+          error(e.message);
+        }
         await printCallRDiagnostics();
       }
       return Promise.reject();
     }
-  } catch (e) {
-    if (reportError) {
-      if (e?.message) {
-        info("");
-        error(e.message);
-      }
-      await printCallRDiagnostics();
-    }
-    return Promise.reject();
+  } finally {
+    await Deno.remove(messagesFile);
+    Deno.env.delete("QUARTO_MESSAGES_FILE");
   }
 }
 

@@ -555,6 +555,7 @@ async function mergeExecutedFiles(
       engineDependencies,
       preserve,
       postProcess,
+      messages: []
     },
     resourceFiles,
   });

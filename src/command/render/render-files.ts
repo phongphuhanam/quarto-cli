@@ -92,6 +92,7 @@ import {
 } from "../../core/timing.ts";
 import { satisfies } from "semver/mod.ts";
 import { quartoConfig } from "../../core/quarto.ts";
+import { processMessages } from "../../execute/process-messages.ts";
 
 export async function renderExecute(
   context: RenderContext,
@@ -434,8 +435,6 @@ export async function renderFiles(
               executeOptions,
             );
 
-            // process messages from execute
-
             // recover source map from diff and create a mappedExecuteResult
             // for markdown processing pre-pandoc with mapped strings
             let mappedMarkdown: MappedString;
@@ -450,6 +449,12 @@ export async function renderFiles(
                 mappedMarkdown = asMappedString(baseExecuteResult.markdown);
               }
             });
+
+            mappedMarkdown = processMessages(
+              mappedMarkdown!,
+              baseExecuteResult.messages,
+            );
+            console.log(mappedMarkdown.value);
 
             const resourceFiles: string[] = [];
             if (baseExecuteResult.resourceFiles) {

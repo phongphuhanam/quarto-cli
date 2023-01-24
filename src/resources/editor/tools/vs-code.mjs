@@ -13050,7 +13050,7 @@ var require_yaml_intelligence_resources = __commonJS({
           tags: {
             formats: [
               "$epub-all",
-              "$chunkedhtml"
+              "chunkedhtml"
             ]
           },
           schema: "number",
@@ -19476,6 +19476,7 @@ var require_yaml_intelligence_resources = __commonJS({
           long: "Specify the heading level at which to split the EPUB into separate\nchapter files. The default is to split into chapters at level-1\nheadings. This option only affects the internal composition of the EPUB,\nnot the way chapters and sections are displayed to users. Some readers\nmay be slow if the chapter files are too large, so for large documents\nwith few level-1 headings, one might want to use a chapter level of 2 or\n3."
         },
         "Use the specified image as the EPUB cover. It is recommended that the\nimage be less than 1000px in width and height.",
+        "If false, disables the generation of a title page.",
         "Engine used for executable code blocks.",
         "Configures the Jupyter engine.",
         "The name to display in the UI.",
@@ -19609,6 +19610,11 @@ var require_yaml_intelligence_resources = __commonJS({
           short: "Whether to hyphenate text at line breaks even in words that do not\ncontain hyphens.",
           long: "Whether to hyphenate text at line breaks even in words that do not\ncontain hyphens if it is necessary to do so to lay out words on a line\nwithout excessive spacing"
         },
+        "If true, tables are formatted as RST list tables.",
+        {
+          short: "Specify the heading level at which to split the EPUB into separate\nchapter files.",
+          long: "Specify the heading level at which to split the EPUB into separate\nchapter files. The default is to split into chapters at level-1\nheadings. This option only affects the internal composition of the EPUB,\nnot the way chapters and sections are displayed to users. Some readers\nmay be slow if the chapter files are too large, so for large documents\nwith few level-1 headings, one might want to use a chapter level of 2 or\n3."
+        },
         "Information about the funding of the research reported in the article\n(for example, grants, contracts, sponsors) and any open access fees for\nthe article itself",
         "Unique identifier assigned to an award, contract, or grant.",
         "Displayable prose statement that describes the funding for the\nresearch on which a work was based.",
@@ -19691,10 +19697,6 @@ var require_yaml_intelligence_resources = __commonJS({
         {
           short: "Specify what to do with insertions, deletions, and comments produced\nby the MS Word \u201CTrack Changes\u201D feature.",
           long: "Specify what to do with insertions, deletions, and comments produced\nby the MS Word \u201CTrack Changes\u201D feature."
-        },
-        {
-          short: "Ignore paragraphs with no content.",
-          long: "<em>Deprecated. Use the <code>+empty_paragraphs</code> extension\ninstead.</em> Ignore paragraphs with no content. This option is useful\nfor converting word processing documents where users have used empty\nparagraphs to create inter-paragraph space."
         },
         {
           short: "Embed the input file source code in the generated HTML",
@@ -20538,7 +20540,7 @@ var require_yaml_intelligence_resources = __commonJS({
         "Source from whence the item originates (e.g.&nbsp;a library catalog or\ndatabase).",
         "Publication status of the item (e.g.&nbsp;\u201Cforthcoming\u201D; \u201Cin press\u201D;\n\u201Cadvance online publication\u201D; \u201Cretracted\u201D)",
         "Date the item (e.g.&nbsp;a manuscript) was submitted for publication.",
-        "Supplement number of the item or container holding the item (e.g.\uFFFD\uFFFDfor\nsecondary legal items that are regularly updated between editions).",
+        "Supplement number of the item or container holding the item (e.g.&nbsp;for\nsecondary legal items that are regularly updated between editions).",
         "Short/abbreviated form of<code>title</code>.",
         "Translator",
         'The <a href="https://docs.citationstyles.org/en/stable/specification.html#appendix-iii-types">type</a>\nof the item.',
@@ -20854,13 +20856,7 @@ var require_yaml_intelligence_resources = __commonJS({
           long: "Title of the volume of the item or container holding the item.\nAlso use for titles of periodical special issues, special sections,\nand the like."
         },
         "Disambiguating year suffix in author-date styles (e.g.&nbsp;\u201Ca\u201D in \u201CDoe,\n1999a\u201D).",
-        "internal-schema-hack",
-        "If false, disables the generation of a title page.",
-        "If true, tables are formatted as RST list tables.",
-        {
-          short: "Specify the heading level at which to split the EPUB into separate\nchapter files.",
-          long: "Specify the heading level at which to split the EPUB into separate\nchapter files. The default is to split into chapters at level-1\nheadings. This option only affects the internal composition of the EPUB,\nnot the way chapters and sections are displayed to users. Some readers\nmay be slow if the chapter files are too large, so for large documents\nwith few level-1 headings, one might want to use a chapter level of 2 or\n3."
-        }
+        "internal-schema-hack"
       ],
       "schema/external-schemas.yml": [
         {
@@ -21084,12 +21080,12 @@ var require_yaml_intelligence_resources = __commonJS({
         mermaid: "%%"
       },
       "handlers/mermaid/schema.yml": {
-        _internalId: 146895,
+        _internalId: 149255,
         type: "object",
         description: "be an object",
         properties: {
           "mermaid-format": {
-            _internalId: 146887,
+            _internalId: 149247,
             type: "enum",
             enum: [
               "png",
@@ -21105,7 +21101,7 @@ var require_yaml_intelligence_resources = __commonJS({
             exhaustiveCompletions: true
           },
           theme: {
-            _internalId: 146894,
+            _internalId: 149254,
             type: "anyOf",
             anyOf: [
               {

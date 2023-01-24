@@ -12343,6 +12343,17 @@ var require_yaml_intelligence_resources = __commonJS({
           },
           schema: "path",
           description: "Use the specified image as the EPUB cover. It is recommended\nthat the image be less than 1000px in width and height.\n"
+        },
+        {
+          name: "epub-title-page",
+          schema: "boolean",
+          default: true,
+          tags: {
+            formats: [
+              "$epub-all"
+            ]
+          },
+          description: "If false, disables the generation of a title page."
         }
       ],
       "schema/document-execute.yml": [
@@ -13022,6 +13033,32 @@ var require_yaml_intelligence_resources = __commonJS({
             short: "Whether to hyphenate text at line breaks even in words that do not contain hyphens.",
             long: "Whether to hyphenate text at line breaks even in words that do not contain \nhyphens if it is necessary to do so to lay out words on a line without excessive spacing\n"
           }
+        },
+        {
+          name: "list-tables",
+          schema: "boolean",
+          default: false,
+          tags: {
+            formats: [
+              "rst"
+            ]
+          },
+          description: "If true, tables are formatted as RST list tables."
+        },
+        {
+          name: "split-level",
+          tags: {
+            formats: [
+              "$epub-all",
+              "$chunkedhtml"
+            ]
+          },
+          schema: "number",
+          default: 1,
+          description: {
+            short: "Specify the heading level at which to split the EPUB into separate\nchapter files.\n",
+            long: "Specify the heading level at which to split the EPUB into separate\nchapter files. The default is to split into chapters at level-1\nheadings. This option only affects the internal composition of the\nEPUB, not the way chapters and sections are displayed to users. Some\nreaders may be slow if the chapter files are too large, so for large\ndocuments with few level-1 headings, one might want to use a chapter\nlevel of 2 or 3.\n"
+          }
         }
       ],
       "schema/document-funding.yml": [
@@ -13310,15 +13347,6 @@ var require_yaml_intelligence_resources = __commonJS({
           description: {
             short: "Specify what to do with insertions, deletions, and comments produced by \nthe MS Word \u201CTrack Changes\u201D feature.\n",
             long: 'Specify what to do with insertions, deletions, and comments\nproduced by the MS Word "Track Changes" feature.  \n\n- `accept` (default): Process all insertions and deletions.\n- `reject`: Ignore them.\n- `all`: Include all insertions, deletions, and comments, wrapped\n  in spans with `insertion`, `deletion`, `comment-start`, and\n  `comment-end` classes, respectively. The author and time of\n  change is included. \n\nNotes:\n\n- Both `accept` and `reject` ignore comments.\n\n- `all` is useful for scripting: only\n  accepting changes from a certain reviewer, say, or before a\n  certain date. If a paragraph is inserted or deleted,\n  `track-changes: all` produces a span with the class\n  `paragraph-insertion`/`paragraph-deletion` before the\n  affected paragraph break. \n\n- This option only affects the docx reader.\n'
-          }
-        },
-        {
-          name: "strip-empty-paragraphs",
-          schema: "boolean",
-          hidden: true,
-          description: {
-            short: "Ignore paragraphs with no content.",
-            long: "*Deprecated.  Use the `+empty_paragraphs` extension instead.*\nIgnore paragraphs with no content.  This option is useful\nfor converting word processing documents where users have\nused empty paragraphs to create inter-paragraph space.\n"
           }
         },
         {
@@ -17078,6 +17106,7 @@ var require_yaml_intelligence_resources = __commonJS({
             "beamer",
             "biblatex",
             "bibtex",
+            "chunkedhtml",
             "commonmark",
             "commonmark_x",
             "context",
@@ -17969,6 +17998,7 @@ var require_yaml_intelligence_resources = __commonJS({
         "beamer",
         "biblatex",
         "bibtex",
+        "chunkedhtml",
         "commonmark",
         "commonmark_x",
         "context",
@@ -20508,7 +20538,7 @@ var require_yaml_intelligence_resources = __commonJS({
         "Source from whence the item originates (e.g.&nbsp;a library catalog or\ndatabase).",
         "Publication status of the item (e.g.&nbsp;\u201Cforthcoming\u201D; \u201Cin press\u201D;\n\u201Cadvance online publication\u201D; \u201Cretracted\u201D)",
         "Date the item (e.g.&nbsp;a manuscript) was submitted for publication.",
-        "Supplement number of the item or container holding the item (e.g.&nbsp;for\nsecondary legal items that are regularly updated between editions).",
+        "Supplement number of the item or container holding the item (e.g.\uFFFD\uFFFDfor\nsecondary legal items that are regularly updated between editions).",
         "Short/abbreviated form of<code>title</code>.",
         "Translator",
         'The <a href="https://docs.citationstyles.org/en/stable/specification.html#appendix-iii-types">type</a>\nof the item.',
@@ -20824,7 +20854,13 @@ var require_yaml_intelligence_resources = __commonJS({
           long: "Title of the volume of the item or container holding the item.\nAlso use for titles of periodical special issues, special sections,\nand the like."
         },
         "Disambiguating year suffix in author-date styles (e.g.&nbsp;\u201Ca\u201D in \u201CDoe,\n1999a\u201D).",
-        "internal-schema-hack"
+        "internal-schema-hack",
+        "If false, disables the generation of a title page.",
+        "If true, tables are formatted as RST list tables.",
+        {
+          short: "Specify the heading level at which to split the EPUB into separate\nchapter files.",
+          long: "Specify the heading level at which to split the EPUB into separate\nchapter files. The default is to split into chapters at level-1\nheadings. This option only affects the internal composition of the EPUB,\nnot the way chapters and sections are displayed to users. Some readers\nmay be slow if the chapter files are too large, so for large documents\nwith few level-1 headings, one might want to use a chapter level of 2 or\n3."
+        }
       ],
       "schema/external-schemas.yml": [
         {
@@ -21048,12 +21084,12 @@ var require_yaml_intelligence_resources = __commonJS({
         mermaid: "%%"
       },
       "handlers/mermaid/schema.yml": {
-        _internalId: 146891,
+        _internalId: 146895,
         type: "object",
         description: "be an object",
         properties: {
           "mermaid-format": {
-            _internalId: 146883,
+            _internalId: 146887,
             type: "enum",
             enum: [
               "png",
@@ -21069,7 +21105,7 @@ var require_yaml_intelligence_resources = __commonJS({
             exhaustiveCompletions: true
           },
           theme: {
-            _internalId: 146890,
+            _internalId: 146894,
             type: "anyOf",
             anyOf: [
               {
@@ -30151,30 +30187,55 @@ function isBlockShortcode(content) {
     return parseShortcode(m[1]);
   }
 }
-function parseShortcode(shortCodeCapture) {
-  const [name, ...args] = shortCodeCapture.trim().split(" ");
-  const namedParams = {};
+function parseShortcodeCapture(capture) {
+  const nameMatch = capture.match(/^[a-zA-Z0-9_]+/);
+  if (!nameMatch) {
+    return;
+  }
   const params = [];
-  const rawParams = args.map((v) => {
-    const p = v.indexOf("=");
-    let name2 = void 0;
-    let value;
-    if (p === -1) {
-      value = v;
-      params.push(value);
-    } else {
-      name2 = v.slice(0, p);
-      value = v.slice(p + 1);
-      namedParams[name2] = value;
+  const namedParams = {};
+  const rawParams = [];
+  const name = nameMatch[0];
+  let paramStr = capture.slice(name.length).trim();
+  const paramName = "([a-zA-Z0-9_-]+)";
+  const paramValue1 = `([^"'\\s]+)`;
+  const paramValue2 = `"([^"]*)"`;
+  const paramValue3 = `'([^']*)'`;
+  const paramValue = `(?:${paramValue1})|(?:${paramValue2})|(?:${paramValue3})`;
+  const paramNameAndValue = `(?:${paramName}\\s*=\\s*${paramValue1})|(?:${paramName}\\s*=\\s*${paramValue2})|(?:${paramName}\\s*=\\s*${paramValue3})`;
+  const paramRe = new RegExp(`(?:${paramValue}|${paramNameAndValue})`);
+  while (paramStr.length) {
+    const paramMatch = paramStr.match(paramRe);
+    if (!paramMatch) {
+      throw new Error("invalid shortcode: " + capture);
     }
-    return { name: name2, value };
-  });
-  return {
-    name,
-    rawParams,
-    namedParams,
-    params
-  };
+    const captures = paramMatch.slice(1).filter((x) => x !== void 0);
+    if (captures.length === 1) {
+      params.push(captures[0]);
+      rawParams.push({
+        value: captures[0]
+      });
+    } else if (captures.length === 2) {
+      namedParams[captures[0]] = captures[1];
+      rawParams.push({
+        name: captures[0],
+        value: captures[1]
+      });
+    } else {
+      throw new Error(
+        "Internal Error, could not determine correct shortcode capture for " + capture
+      );
+    }
+    paramStr = paramStr.slice(paramMatch[0].length).trim();
+  }
+  return { name, params, namedParams, rawParams };
+}
+function parseShortcode(shortCodeCapture) {
+  const result = parseShortcodeCapture(shortCodeCapture);
+  if (!result) {
+    throw new Error("invalid shortcode: " + shortCodeCapture);
+  }
+  return result;
 }
 
 // ../break-quarto-md.ts

@@ -24,7 +24,7 @@ function resolveRefs()
           label = pandoc.text.lower(label:sub(1, 1)) .. label:sub(2)
         
           -- lookup the label
-          local resolve = param("crossref-resolve-refs", true)
+          local resolve = param("crossref-resolve-refs", false)
           local entry = crossref.index.entries[label]
           if entry ~= nil or not resolve then
         

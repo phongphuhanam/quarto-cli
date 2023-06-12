@@ -1,9 +1,8 @@
 /*
-* output.ts
-*
-* Copyright (C) 2020-2022 Posit Software, PBC
-*
-*/
+ * output.ts
+ *
+ * Copyright (C) 2020-2022 Posit Software, PBC
+ */
 
 import {
   basename,
@@ -19,7 +18,12 @@ import { writeFileToStdout } from "../../core/console.ts";
 import { dirAndStem, expandPath } from "../../core/path.ts";
 import { partitionYamlFrontMatter } from "../../core/yaml.ts";
 
-import { kOutputExt, kOutputFile, kVariant } from "../../config/constants.ts";
+import {
+  kOutputExt,
+  kOutputFile,
+  kPreserveYaml,
+  kVariant,
+} from "../../config/constants.ts";
 
 import {
   quartoLatexmkOutputRecipe,
@@ -77,7 +81,7 @@ export function outputRecipe(
     // default recipe spec based on user input
     const completeActions: VoidFunction[] = [];
 
-    const recipe = {
+    const recipe: OutputRecipe = {
       output,
       keepYaml: false,
       args: options.pandocArgs || [],
@@ -129,7 +133,8 @@ export function outputRecipe(
     }
 
     // complete hook for keep-yaml
-    if (recipe.keepYaml) {
+    // workaround for https://github.com/quarto-dev/quarto-cli/issues/5079
+    if (recipe.keepYaml || recipe.format.render[kPreserveYaml]) {
       completeActions.push(() => {
         // read yaml and output markdown
         const inputMd = partitionYamlFrontMatter(context.target.markdown.value);
@@ -175,6 +180,7 @@ export function outputRecipe(
       // forward to stdout (necessary b/c a postprocesor may need to act on
       // the output before its complete)
       updateOutput(options.services.temp.createFile({ suffix: "." + ext }));
+      recipe.isOutputTransient = true;
       completeActions.push(() => {
         writeFileToStdout(recipe.output);
         Deno.removeSync(recipe.output);

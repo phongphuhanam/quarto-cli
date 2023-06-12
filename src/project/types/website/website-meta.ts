@@ -301,6 +301,7 @@ function resolveImageMetadata(
   const siteMeta = format.metadata[kWebsite] as Metadata;
   if (metadata[kImage] && siteMeta && siteMeta[kSiteUrl] !== undefined) {
     // Resolve any relative urls and figure out image size
+    const inputRelImg = metadata[kImage];
     const imgMeta = imageMetadata(
       metadata[kImage] as string,
       siteMeta[kSiteUrl] as string,
@@ -318,7 +319,7 @@ function resolveImageMetadata(
       metadata[kImageAlt] = altText;
     }
 
-    return imgMeta.path;
+    return inputRelImg as string;
   }
 }
 
@@ -496,23 +497,21 @@ function metaMarkdownPipeline(format: Format, extras: FormatExtras) {
 
       // Twitter
       const twitterMeta = twitterMetadata(format);
-      inlines[kTwitterDesc] = twitterMeta.title as string || description ||
+      inlines[kTwitterDesc] = twitterMeta.description as string ||
+        description ||
         "";
 
       // Oopengraph
       const ogMeta = opengraphMetadata(format);
-      inlines[kOgDesc] = ogMeta.title as string || description || "";
-
-      if (description !== undefined) {
-        return inlines;
-      }
+      inlines[kOgDesc] = ogMeta.description as string || description || "";
+      return { inlines };
     },
     processRendered(rendered: Record<string, Element>, doc: Document) {
       // Meta values
       const metaVals = [{
         sel: 'meta[property="og:description"]',
-        key: kTwitterDesc,
-      }, { sel: 'meta[name="twitter:description"]', key: kOgDesc }];
+        key: kOgDesc,
+      }, { sel: 'meta[name="twitter:description"]', key: kTwitterDesc }];
 
       metaVals.forEach((metaVal) => {
         const renderedEl = rendered[metaVal.key];

@@ -1,9 +1,8 @@
 /*
-* render-info.ts
-*
-* Copyright (C) 2022 Posit Software, PBC
-*
-*/
+ * render-info.ts
+ *
+ * Copyright (C) 2022 Posit Software, PBC
+ */
 
 import { Format, FormatExecute, Metadata } from "../../config/types.ts";
 import {
@@ -52,16 +51,19 @@ import {
   kTargetFormat,
   kTheme,
 } from "../../config/constants.ts";
-import { resolveLanguageMetadata } from "../../core/language.ts";
+import {
+  formatLanguage,
+  resolveLanguageMetadata,
+} from "../../core/language.ts";
 import { defaultWriterFormat } from "../../format/formats.ts";
 import { mergeConfigs } from "../../core/config.ts";
 import { ExecutionEngine, ExecutionTarget } from "../../execute/types.ts";
+import { projectMetadataForInputFile } from "../../project/project-context.ts";
 import {
   deleteProjectMetadata,
   directoryMetadataForInputFile,
-  projectMetadataForInputFile,
   projectTypeIsWebsite,
-} from "../../project/project-context.ts";
+} from "../../project/project-shared.ts";
 import {
   kProjectLibDir,
   kProjectType,
@@ -85,8 +87,8 @@ import {
   isValidFormat,
   parseFormatString,
 } from "../../core/pandoc/pandoc-formats.ts";
-import { ExtensionContext } from "../../extension/extension-shared.ts";
-import { renderServices } from "./render-shared.ts";
+import { ExtensionContext } from "../../extension/types.ts";
+import { renderServices } from "./render-services.ts";
 
 export async function resolveFormatsFromMetadata(
   metadata: Metadata,
@@ -235,6 +237,12 @@ export async function renderContexts(
   // return contexts
   const contexts: Record<string, RenderContext> = {};
   for (const formatKey of Object.keys(formats)) {
+    formats[formatKey].format.language = await formatLanguage(
+      formats[formatKey].format.metadata,
+      formats[formatKey].format.language,
+      options.flags,
+    );
+
     // set format
     const context: RenderContext = {
       target,
@@ -609,6 +617,11 @@ async function resolveFormats(
       );
     }
 
+    // Allow the project type to filter the format
+    if (projType.filterFormat) {
+      format = projType.filterFormat(target.source, format, project);
+    }
+
     mergedFormats[formatName] = format;
   }
 
@@ -642,8 +655,12 @@ const readExtensionFormat = async (
     // Read the yaml file and resolve / bucketize
     const extensionFormat = extension?.contributes.formats;
     if (extensionFormat) {
+      const fmtTarget = formatDesc.modifiers
+        ? `${formatDesc.baseFormat}${formatDesc.modifiers.join("")}`
+        : formatDesc.baseFormat;
       const extensionMetadata =
-        (extensionFormat[formatDesc.baseFormat] || {}) as Metadata;
+        (extensionFormat[fmtTarget] || extensionFormat[formatDesc.baseFormat] ||
+          {}) as Metadata;
       extensionMetadata[kExtensionName] = extensionMetadata[kExtensionName] ||
         formatDesc.extension;
 

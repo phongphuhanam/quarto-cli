@@ -1,13 +1,13 @@
 /*
-* check.ts
-*
-* Copyright (C) 2021-2022 Posit Software, PBC
-*
-*/
+ * check.ts
+ *
+ * Copyright (C) 2021-2022 Posit Software, PBC
+ */
 
 import { info } from "log/mod.ts";
 
-import { render, renderServices } from "../render/render-shared.ts";
+import { render } from "../render/render-shared.ts";
+import { renderServices } from "../render/render-services.ts";
 
 import { JupyterCapabilities } from "../../core/jupyter/types.ts";
 import { jupyterCapabilities } from "../../core/jupyter/capabilities.ts";
@@ -82,12 +82,26 @@ async function checkVersions(_services: RenderServices) {
 
   completeMessage("Checking versions of quarto binary dependencies...");
 
-  const pandocVersion = lines(
+  let pandocVersion = lines(
     (await execProcess({
       cmd: [pandocBinaryPath(), "--version"],
       stdout: "piped",
     })).stdout!,
   )[0]?.split(" ")[1];
+  // We hack around pandocVersion to build a sem-verish string
+  // that satisfies the semver package
+  // if pandoc reports more than three version numbers, pick the first three
+  // if pandoc reports fewer than three version numbers, pad with zeros
+  if (pandocVersion) {
+    const versionParts = pandocVersion.split(".");
+    if (versionParts.length > 3) {
+      pandocVersion = versionParts.slice(0, 3).join(".");
+    } else if (versionParts.length < 3) {
+      pandocVersion = versionParts.concat(
+        Array(3 - versionParts.length).fill("0"),
+      ).join(".");
+    }
+  }
   checkVersion(pandocVersion, ">=2.19.2", "Pandoc");
 
   const sassVersion = (await dartCommand(["--version"]))?.trim();
@@ -217,7 +231,7 @@ async function checkKnitrInstallation(services: RenderServices) {
     completeMessage(kMessage + "OK");
     info(knitrCapabilitiesMessage(caps, kIndent));
     info("");
-    if (caps.rmarkdown) {
+    if (caps.packages.rmarkdown && caps.packages.knitrVersOk) {
       const kKnitrMessage = "Checking Knitr engine render......";
       await withSpinner({
         message: kKnitrMessage,
@@ -226,7 +240,15 @@ async function checkKnitrInstallation(services: RenderServices) {
         await checkKnitrRender(services);
       });
     } else {
-      info(knitrInstallationMessage(kIndent));
+      info(
+        knitrInstallationMessage(
+          kIndent,
+          caps.packages.knitr && !caps.packages.knitrVersOk
+            ? "knitr"
+            : "rmarkdown",
+          !!caps.packages.knitr && !caps.packages.knitrVersOk,
+        ),
+      );
       info("");
     }
   } else {

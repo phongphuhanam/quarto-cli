@@ -1,9 +1,8 @@
 /*
-* cmd.ts
-*
-* Copyright (C) 2020-2022 Posit Software, PBC
-*
-*/
+ * cmd.ts
+ *
+ * Copyright (C) 2020-2022 Posit Software, PBC
+ */
 
 import { existsSync } from "fs/mod.ts";
 import { dirname, extname, join, relative } from "path/mod.ts";
@@ -12,7 +11,8 @@ import * as colors from "fmt/colors.ts";
 
 import { Command } from "cliffy/command/mod.ts";
 
-import { kLocalhost, waitForPort } from "../../core/port.ts";
+import { kLocalhost } from "../../core/port-consts.ts";
+import { waitForPort } from "../../core/port.ts";
 import { fixupPandocArgs, parseRenderFlags } from "../render/flags.ts";
 import {
   handleRenderResult,
@@ -32,15 +32,20 @@ import {
 } from "../../core/lib/yaml-validation/state.ts";
 import { initYamlIntelligenceResourcesFromFilesystem } from "../../core/schema/utils.ts";
 import { kProjectWatchInputs, ProjectContext } from "../../project/types.ts";
+import { projectContext } from "../../project/project-context.ts";
 import {
-  projectContext,
   projectIsServeable,
   projectPreviewServe,
-} from "../../project/project-context.ts";
+} from "../../project/project-shared.ts";
+
 import { isHtmlOutput } from "../../config/format.ts";
 import { renderProject } from "../render/project.ts";
-import { renderServices } from "../render/render-shared.ts";
+import { renderServices } from "../render/render-services.ts";
 import { parseFormatString } from "../../core/pandoc/pandoc-formats.ts";
+import { normalizePath } from "../../core/path.ts";
+import { kCliffyImplicitCwd } from "../../config/constants.ts";
+import { warning } from "log/mod.ts";
+
 export const previewCommand = new Command()
   .name("preview")
   .stopEarly()
@@ -128,6 +133,24 @@ export const previewCommand = new Command()
     // one-time initialization of yaml validation modules
     setInitializer(initYamlIntelligenceResourcesFromFilesystem);
     await initState();
+
+    // if input is missing but there exists an args parameter which is a .qmd or .ipynb file,
+    // issue a warning.
+    if (!file || file === kCliffyImplicitCwd) {
+      file = Deno.cwd();
+      const firstArg = args.find((arg) =>
+        arg.endsWith(".qmd") || arg.endsWith(".ipynb")
+      );
+      if (firstArg) {
+        warning(
+          "`quarto preview` invoked with no input file specified (the parameter order matters).\nQuarto will preview the current directory by default.\n" +
+            `Did you mean to run \`quarto preview ${firstArg} ${
+              args.filter((arg) => arg !== firstArg).join(" ")
+            }\`?\n` +
+            "Use `quarto preview --help` for more information.",
+        );
+      }
+    }
 
     file = file || Deno.cwd();
     if (!existsSync(file)) {
@@ -249,7 +272,7 @@ export const previewCommand = new Command()
         // in the project input list -- in this case allow things to proceed
         // without a render
         const format = await previewFormat(file, flags.to, project);
-        const filePath = Deno.realPathSync(file);
+        const filePath = normalizePath(file);
         if (!project.files.input.includes(filePath)) {
           if (extname(file) === ".md" && projectPreviewServe(project)) {
             setPreviewFormat(format, flags, args);

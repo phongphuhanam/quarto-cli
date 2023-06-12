@@ -1,16 +1,19 @@
 /*
-* watch.ts
-*
-* Copyright (C) 2020-2022 Posit Software, PBC
-*
-*/
+ * watch.ts
+ *
+ * Copyright (C) 2020-2022 Posit Software, PBC
+ */
 
 import { dirname, globToRegExp, join, relative, SEP } from "path/mod.ts";
 import { existsSync, walkSync } from "fs/mod.ts";
 
 import * as ld from "../../core/lodash.ts";
 
-import { kSkipHidden, pathWithForwardSlashes } from "../../core/path.ts";
+import {
+  kSkipHidden,
+  normalizePath,
+  pathWithForwardSlashes,
+} from "../../core/path.ts";
 import { md5Hash } from "../../core/hash.ts";
 
 import { logError } from "../../core/log.ts";
@@ -28,7 +31,9 @@ import { ProjectWatcher, ServeOptions } from "./types.ts";
 import { httpDevServer } from "../../core/http-devserver.ts";
 import { RenderFlags } from "../../command/render/types.ts";
 import { renderProject } from "../../command/render/project.ts";
-import { render, renderServices } from "../../command/render/render-shared.ts";
+import { render } from "../../command/render/render-shared.ts";
+import { renderServices } from "../../command/render/render-services.ts";
+
 import { isRStudio } from "../../core/platform.ts";
 import { inputTargetIndexForOutputFile } from "../../project/project-index.ts";
 import { engineIgnoreDirs } from "../../execute/engine.ts";
@@ -59,7 +64,7 @@ export function watchProject(
   };
 
   // proj dir
-  const projDir = Deno.realPathSync(project.dir);
+  const projDir = normalizePath(project.dir);
   const projDirHidden = projDir + "/.";
 
   // output dir

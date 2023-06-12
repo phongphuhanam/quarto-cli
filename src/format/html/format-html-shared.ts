@@ -1,9 +1,8 @@
 /*
-* format-html-shared.ts
-*
-* Copyright (C) 2020-2022 Posit Software, PBC
-*
-*/
+ * format-html-shared.ts
+ *
+ * Copyright (C) 2020-2022 Posit Software, PBC
+ */
 import { dirname, join, relative } from "path/mod.ts";
 import { outputVariable, sassLayer, sassVariable } from "../../core/sass.ts";
 import {
@@ -27,6 +26,7 @@ import {
 
 import { formatResourcePath } from "../../core/resources.ts";
 import { Document, Element } from "../../core/deno-dom.ts";
+import { normalizePath } from "../../core/path.ts";
 
 // features that are enabled by default for 'html'. setting
 // all of these to false will yield the minimal html output
@@ -61,6 +61,7 @@ export const kGiscusCategoryId = "category-id";
 export const kDraft = "draft";
 
 export const kAppendixStyle = "appendix-style";
+export const kAppendixCiteAs = "appendix-cite-as";
 export const kLicense = "license";
 export const kCopyright = "copyright";
 
@@ -356,7 +357,7 @@ function prependHeading(
 export function removeFootnoteBacklinks(footnotesEl: Element) {
   const backlinks = footnotesEl.querySelectorAll(".footnote-back");
   for (const backlink of backlinks) {
-    backlink.remove();
+    (backlink as Element).remove();
   }
 }
 
@@ -401,7 +402,7 @@ export function computeUrl(
   offset: string,
   outputFileName: string,
 ) {
-  const rootDir = Deno.realPathSync(join(dirname(input), offset));
+  const rootDir = normalizePath(join(dirname(input), offset));
   if (outputFileName === "index.html") {
     return `${baseUrl}/${relative(rootDir, dirname(input))}`;
   } else {
@@ -458,4 +459,18 @@ export function writeMetaTag(name: string, content: string, doc: Document) {
   // Insert the nodes
   doc.querySelector("head")?.appendChild(m);
   doc.querySelector("head")?.appendChild(nl);
+}
+
+export function formatPageLayout(format: Format) {
+  return format.metadata[kPageLayout] as string || kPageLayoutArticle;
+}
+
+export function formatHasFullLayout(format: Format) {
+  return format.metadata[kPageLayout] === kPageLayoutFull;
+}
+
+export function formatHasArticleLayout(format: Format) {
+  return format.metadata[kPageLayout] === undefined ||
+    format.metadata[kPageLayout] === kPageLayoutArticle ||
+    format.metadata[kPageLayout] === kPageLayoutFull;
 }

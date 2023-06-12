@@ -313,3 +313,13 @@
 
       - `>= 1.1.0`: Require at least quarto version 1.1
       - `1.*`: Require any quarto versions whose major version number is 1
+
+- name: preview-mode
+  schema: string
+  tags:
+    formats: [$jats-all, gfm]
+  description:
+    short: "The mode to use when previewing this document."
+    long: |
+      The mode to use when previewing this document. To disable any special
+      previewing features, pass `raw` as the preview-mode.

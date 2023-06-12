@@ -1,24 +1,19 @@
 /*
-* render.ts
-*
-* Copyright (C) 2020-2022 Posit Software, PBC
-*
-*/
+ * render.ts
+ *
+ * Copyright (C) 2020-2022 Posit Software, PBC
+ */
 
 import { ensureDirSync, existsSync } from "fs/mod.ts";
 
-import { basename, dirname, isAbsolute, join, relative } from "path/mod.ts";
+import { dirname, isAbsolute, join, relative } from "path/mod.ts";
 
 import { Document, parseHtml } from "../../core/deno-dom.ts";
 
 import { mergeConfigs } from "../../core/config.ts";
-import {
-  formatResourcePath,
-  pandocBinaryPath,
-  resourcePath,
-} from "../../core/resources.ts";
+import { resourcePath } from "../../core/resources.ts";
 import { inputFilesDir } from "../../core/render.ts";
-import { pathWithForwardSlashes } from "../../core/path.ts";
+import { normalizePath, pathWithForwardSlashes } from "../../core/path.ts";
 
 import { FormatPandoc } from "../../config/types.ts";
 import {
@@ -31,6 +26,7 @@ import {
   HtmlPostProcessResult,
   PandocInputTraits,
   PandocOptions,
+  PandocRenderCompletion,
   RenderedFormat,
 } from "./types.ts";
 import { runPandoc } from "./pandoc.ts";
@@ -43,7 +39,6 @@ import { Metadata } from "../../config/types.ts";
 import { isHtmlFileOutput } from "../../config/format.ts";
 
 import { isSelfContainedOutput } from "./render-info.ts";
-import { execProcess } from "../../core/process.ts";
 import {
   pop as popTiming,
   push as pushTiming,
@@ -52,13 +47,14 @@ import {
 } from "../../core/timing.ts";
 import { filesDirMediabagDir } from "./render-paths.ts";
 import { replaceNotebookPlaceholders } from "../../core/jupyter/jupyter-embed.ts";
-import { kIncludeAfterBody, kIncludeInHeader } from "../../config/constants.ts";
-
-export interface PandocRenderCompletion {
-  complete: (
-    outputs: RenderedFormat[],
-  ) => Promise<RenderedFile>;
-}
+import {
+  kIncludeAfterBody,
+  kIncludeBeforeBody,
+  kIncludeInHeader,
+  kInlineIncludes,
+  kResourcePath,
+} from "../../config/constants.ts";
+import { pandocIngestSelfContainedContent } from "../../core/pandoc/self-contained.ts";
 
 export async function renderPandoc(
   file: ExecutedFile,
@@ -121,9 +117,9 @@ export async function renderPandoc(
     executeResult.markdown,
   );
 
-  if (notebookResult.supporting) {
-    executeResult.supporting = executeResult.supporting || [];
-    executeResult.supporting.push(notebookResult.supporting);
+  const embedSupporting: string[] = [];
+  if (notebookResult.supporting.length) {
+    embedSupporting.push(...notebookResult.supporting);
   }
 
   // Map notebook includes to pandoc includes
@@ -142,11 +138,40 @@ export async function renderPandoc(
     pandocIncludes,
   );
 
+  // resolve markdown. for [  ] output type we collect up
+  // the includes so they can be proccessed by Lua
+  let markdownInput = notebookResult.markdown
+    ? notebookResult.markdown
+    : executeResult.markdown;
+  if (format.render[kInlineIncludes]) {
+    const collectIncludes = (
+      location:
+        | "include-in-header"
+        | "include-before-body"
+        | "include-after-body",
+    ) => {
+      const includes = format.pandoc[location];
+      if (includes) {
+        const append = location === "include-after-body";
+        for (const include of includes) {
+          const includeMd = Deno.readTextFileSync(include);
+          if (append) {
+            markdownInput = `${markdownInput}\n\n${includeMd}`;
+          } else {
+            markdownInput = `${includeMd}\n\n${markdownInput}`;
+          }
+        }
+        delete format.pandoc[location];
+      }
+    };
+    collectIncludes(kIncludeInHeader);
+    collectIncludes(kIncludeBeforeBody);
+    collectIncludes(kIncludeAfterBody);
+  }
+
   // pandoc options
   const pandocOptions: PandocOptions = {
-    markdown: notebookResult.markdown
-      ? notebookResult.markdown
-      : executeResult.markdown,
+    markdown: markdownInput,
     source: context.target.source,
     output: recipe.output,
     keepYaml: recipe.keepYaml,
@@ -249,7 +274,10 @@ export async function renderPandoc(
         // If this is self-contained, run pandoc to 'suck in' the dependencies
         // which may have been added in the post processor
         if (selfContained && isHtmlFileOutput(format.pandoc)) {
-          await pandocIngestSelfContainedContent(outputFile);
+          await pandocIngestSelfContainedContent(
+            outputFile,
+            format.pandoc[kResourcePath],
+          );
         }
       });
 
@@ -288,6 +316,10 @@ export async function renderPandoc(
         supporting = supporting || [];
         supporting.push(...htmlPostProcessResult.supporting);
       }
+      if (embedSupporting && embedSupporting.length > 0) {
+        supporting = supporting || [];
+        supporting.push(...embedSupporting);
+      }
 
       withTiming("render-cleanup", () =>
         renderCleanup(
@@ -303,13 +335,13 @@ export async function renderPandoc(
         if (context.project) {
           if (isAbsolute(path)) {
             return relative(
-              Deno.realPathSync(context.project.dir),
-              Deno.realPathSync(path),
+              normalizePath(context.project.dir),
+              normalizePath(path),
             );
           } else {
             return relative(
-              Deno.realPathSync(context.project.dir),
-              Deno.realPathSync(join(dirname(context.target.source), path)),
+              normalizePath(context.project.dir),
+              normalizePath(join(dirname(context.target.source), path)),
             );
           }
         } else {
@@ -318,7 +350,8 @@ export async function renderPandoc(
       };
       popTiming();
 
-      return {
+      const result: RenderedFile = {
+        isTransient: recipe.isOutputTransient,
         input: projectPath(context.target.source),
         markdown: executeResult.markdown,
         format,
@@ -327,13 +360,16 @@ export async function renderPandoc(
             context.project ? relative(context.project.dir, file) : file
           )
           : undefined,
-        file: projectPath(finalOutput!),
+        file: recipe.isOutputTransient
+          ? finalOutput!
+          : projectPath(finalOutput!),
         resourceFiles: {
           globs: pandocResult.resources,
           files: resourceFiles.concat(htmlPostProcessResult.resources),
         },
         selfContained: selfContained!,
       };
+      return result;
     },
   };
 }
@@ -387,8 +423,8 @@ export function renderResultFinalOutput(
 
   // return a path relative to the input file
   if (relativeToInputDir) {
-    const inputRealPath = Deno.realPathSync(relativeToInputDir);
-    const outputRealPath = Deno.realPathSync(finalOutput);
+    const inputRealPath = normalizePath(relativeToInputDir);
+    const outputRealPath = normalizePath(finalOutput);
     return relative(inputRealPath, outputRealPath);
   } else {
     return finalOutput;
@@ -465,41 +501,3 @@ async function runHtmlPostprocessors(
   }
   return postProcessResult;
 }
-
-export const pandocIngestSelfContainedContent = async (file: string) => {
-  const filename = basename(file);
-  const workingDir = dirname(file);
-
-  // The template
-  const template = formatResourcePath(
-    "html",
-    "pandoc-selfcontained/selfcontained.html",
-  );
-
-  // The raw html contents
-  const contents = Deno.readTextFileSync(file);
-  const input: string[] = [];
-  input.push("````````{=html}");
-  input.push(contents);
-  input.push("````````");
-
-  // Run pandoc to suck in dependencies
-  const cmd = [pandocBinaryPath()];
-  cmd.push("--to", "html");
-  cmd.push("--from", "markdown");
-  cmd.push("--template", template);
-  cmd.push("--output", filename);
-  cmd.push("--metadata", "title=placeholder");
-  cmd.push("--embed-resources");
-  const result = await execProcess({
-    cmd,
-    stdout: "piped",
-    cwd: workingDir,
-  }, input.join("\n"));
-
-  if (result.success) {
-    return result.stdout;
-  } else {
-    throw new Error();
-  }
-};

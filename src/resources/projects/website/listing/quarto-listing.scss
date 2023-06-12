@@ -362,10 +362,9 @@ ul.pagination {
 
   p.card-img-top {
     margin-bottom: 0;
-  }
-
-  img.thumbnail-image {
-    object-fit: cover;
+    > img {
+      object-fit: cover;
+    }
   }
 
   .card-other-values {
@@ -389,7 +388,7 @@ ul.pagination {
     height: 100%;
   }
 
-  div.card-img-bg {
+  .listing-item-img-placeholder {
     background-color: $card-cap-bg;
     flex-shrink: 0;
   }

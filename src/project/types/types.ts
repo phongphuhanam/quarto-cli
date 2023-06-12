@@ -16,7 +16,6 @@ import {
 } from "../../command/render/types.ts";
 import { PandocOptions } from "../../command/render/types.ts";
 import { ProjectConfig, ProjectContext } from "../types.ts";
-import { TempContext } from "../../core/temp-types.ts";
 
 export interface ProjectType {
   type: string;
@@ -33,6 +32,11 @@ export interface ProjectType {
   outputDir?: string;
   cleanOutputDir?: boolean;
   formatLibDirs?: () => string[];
+  filterFormat?: (
+    source: string,
+    format: Format,
+    project?: ProjectContext
+  ) => Format;
   formatExtras?: (
     context: ProjectContext,
     input: string,
@@ -78,6 +82,10 @@ export interface ProjectType {
     incremental: boolean,
     outputFiles: ProjectOutputFile[],
   ) => Promise<void>;
+  formatOutputDirectory?: (
+    format: Format,
+  ) => string | undefined;
+  selfContainedOutput?: (format: Format) => boolean;
 }
 
 export interface ProjectOutputFile {

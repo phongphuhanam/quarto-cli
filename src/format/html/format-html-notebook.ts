@@ -1,9 +1,8 @@
 /*
-* format-html-embed.ts
-*
-* Copyright (C) 2020-2022 Posit Software, PBC
-*
-*/
+ * format-html-embed.ts
+ *
+ * Copyright (C) 2020-2022 Posit Software, PBC
+ */
 import { formatResourcePath } from "../../core/resources.ts";
 import { renderEjs } from "../../core/ejs.ts";
 import { asArray } from "../../core/array.ts";
@@ -19,6 +18,7 @@ import {
   kSourceNotebookPrefix,
   kTemplate,
   kTheme,
+  kTo,
 } from "../../config/constants.ts";
 import { Format, NotebookPublishOptions } from "../../config/types.ts";
 
@@ -27,21 +27,22 @@ import {
   RenderServices,
 } from "../../command/render/types.ts";
 
-import { basename, dirname, join, relative } from "path/mod.ts";
+import { basename, dirname, isAbsolute, join, relative } from "path/mod.ts";
 import { renderFiles } from "../../command/render/render-files.ts";
 import { ProjectContext } from "../../project/types.ts";
+import { kNotebookViewStyleNotebook } from "./format-html-constants.ts";
+import { warning } from "log/mod.ts";
 
 interface NotebookView {
   title: string;
   href: string;
+  supporting?: string[];
 }
 
 interface NotebookViewOptions {
   title: string;
   href?: string;
 }
-
-export const kNotebookViewStyleNotebook = "notebook";
 
 const kQuartoNbClass = "quarto-notebook";
 const kQuartoCellContainerClass = "cell-container";
@@ -123,7 +124,7 @@ export async function processNotebookEmbeds(
   if (notebookDivNodes.length > 0) {
     const nbPaths: Record<
       string,
-      { href: string; title: string; filename?: string }
+      { href: string; title: string; supporting?: string; filename?: string }
     > = {};
     let count = 1;
 
@@ -132,9 +133,11 @@ export async function processNotebookEmbeds(
     for (const nbDivNode of notebookDivNodes) {
       const nbDivEl = nbDivNode as Element;
       const notebookPath = nbDivEl.getAttribute("data-notebook");
+      nbDivEl.removeAttribute("data-notebook");
       if (notebookPath) {
         linkedNotebooks.push(notebookPath);
         const title = nbDivEl.getAttribute("data-notebook-title");
+        nbDivEl.removeAttribute("data-notebook-title");
         const nbDir = dirname(notebookPath);
         const filename = basename(notebookPath);
         const inputDir = dirname(input);
@@ -144,7 +147,9 @@ export async function processNotebookEmbeds(
             // Read options for this notebook
             const nbPreviewOptions = nbViewConfig.options(notebookPath);
 
-            const nbAbsPath = join(inputDir, notebookPath);
+            const nbAbsPath = isAbsolute(notebookPath)
+              ? notebookPath
+              : join(inputDir, notebookPath);
             const htmlPreview = await renderHtmlView(
               inputDir,
               nbAbsPath,
@@ -156,6 +161,7 @@ export async function processNotebookEmbeds(
             return {
               title: htmlPreview.title,
               href: htmlPreview.href,
+              supporting: htmlPreview.supporting,
             };
           } else {
             return {
@@ -272,13 +278,12 @@ export async function processNotebookEmbeds(
 
     const supporting: string[] = [];
     const resources: string[] = [];
-    const inputDir = dirname(input);
     for (const notebookPath of Object.keys(nbPaths)) {
       const nbPath = nbPaths[notebookPath];
       // If there is a view configured for this, then
       // include it in the supporting dir
-      if (nbViewConfig) {
-        supporting.push(join(inputDir, nbPath.href));
+      if (nbPath.supporting) {
+        supporting.push(...nbPath.supporting);
       }
 
       // This is the notebook itself
@@ -347,17 +352,18 @@ async function renderHtmlView(
       path: href,
       filename,
     });
-    const templatePath = services.temp.createFile({ suffix: "html" });
+    const templatePath = services.temp.createFile({ suffix: ".html" });
     Deno.writeTextFileSync(templatePath, embedTemplate);
 
     // Render the notebook and update the path
     const nbPreviewFile = `${filename}.html`;
-    await renderFiles(
-      [{ path: nbAbsPath }],
+    const rendered = await renderFiles(
+      [{ path: nbAbsPath, formats: ["html"] }],
       {
         services,
         flags: {
           metadata: {
+            [kTo]: "html",
             [kTheme]: format.metadata[kTheme],
             [kOutputFile]: nbPreviewFile,
             [kTemplate]: templatePath,
@@ -370,10 +376,27 @@ async function renderHtmlView(
       undefined,
       project,
     );
+    if (rendered.error) {
+      // TODO: This should throw in future releases rather than warn
+      // Only adding warning for now because of timing of release of 1.3
+      warning(`Failed to render preview for notebook ${nbAbsPath}`);
+    }
+
+    const nbPreviewPath = join(inputDir, dirname(href), nbPreviewFile);
+    const supporting = [nbPreviewPath];
+    for (const renderedFile of rendered.files) {
+      if (renderedFile.supporting) {
+        supporting.push(...renderedFile.supporting.map((file) => {
+          return isAbsolute(file) ? file : join(inputDir, file);
+        }));
+      }
+    }
 
     return {
       title: options.title,
       href: join(dirname(href), nbPreviewFile),
+      // notebook to be included as supporting file
+      supporting,
     };
   } else {
     return {

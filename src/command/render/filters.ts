@@ -1,9 +1,8 @@
 /*
-* filters.ts
-*
-* Copyright (C) 2020-2022 Posit Software, PBC
-*
-*/
+ * filters.ts
+ *
+ * Copyright (C) 2020-2022 Posit Software, PBC
+ */
 
 import { existsSync } from "fs/mod.ts";
 
@@ -29,6 +28,7 @@ import {
   kKeepHidden,
   kMergeIncludes,
   kOutputDivs,
+  kOutputLocation,
   kPdfEngine,
   kQuartoFilters,
   kReferenceLocation,
@@ -42,6 +42,7 @@ import {
   FormatPandoc,
   QuartoFilter,
 } from "../../config/types.ts";
+import { QuartoFilterSpec } from "./types.ts";
 import { Metadata } from "../../config/types.ts";
 import { kProjectType } from "../../project/types.ts";
 import { bibEngine } from "../../config/pdf.ts";
@@ -62,11 +63,15 @@ import {
 import { quartoConfig } from "../../core/quarto.ts";
 import { metadataNormalizationFilterActive } from "./normalize.ts";
 import { kCodeAnnotations } from "../../format/html/format-html-shared.ts";
+import { projectOutputDir } from "../../project/project-shared.ts";
+import { relative } from "path/mod.ts";
+import { citeIndexFilterParams } from "../../project/project-cites.ts";
+import { debug } from "log/mod.ts";
 
 const kQuartoParams = "quarto-params";
 
 const kProjectOffset = "project-offset";
-const kProjectOutputDir = "project-output-dir";
+const kFilterProjectOutputDir = "project-output-dir";
 
 const kMediabagDir = "mediabag-dir";
 
@@ -120,6 +125,7 @@ export async function filterParamsJson(
     ...quartoColumnParams,
     ...await quartoFilterParams(options, defaults),
     ...crossrefFilterParams(options, defaults),
+    ...citeIndexFilterParams(options, defaults),
     ...layoutFilterParams(options.format),
     ...languageFilterParams(options.format.language),
     ...filterParams,
@@ -414,9 +420,12 @@ function projectFilterParams(options: PandocOptions) {
 
   const additionalParams: Metadata = {};
 
-  const outputDir = options.project?.config?.project["output-dir"];
-  if (outputDir) {
-    additionalParams[kProjectOutputDir] = outputDir;
+  if (options.project) {
+    const absProjectOutputDir = projectOutputDir(options.project);
+    const outputDir = relative(options.project.dir, absProjectOutputDir);
+    if (outputDir) {
+      additionalParams[kFilterProjectOutputDir] = outputDir;
+    }
   }
   if (options.offset) {
     additionalParams[kProjectOffset] = options.offset;
@@ -481,6 +490,12 @@ async function quartoFilterParams(
   if (figResponsive) {
     params[kFigResponsive] = figResponsive;
   }
+
+  const outputLocation = format.metadata[kOutputLocation];
+  if (outputLocation) {
+    params[kOutputLocation] = outputLocation;
+  }
+
   const lineNumbers = format.render[kCodeLineNumbers];
   if (lineNumbers) {
     params[kCodeLineNumbers] = lineNumbers;
@@ -538,6 +553,7 @@ function initFilterParams(dependenciesFile: string) {
   if (Deno.build.os === "windows") {
     const value = readCodePage();
     if (value) {
+      debug("Windows: Using code page " + value);
       Deno.env.set("QUARTO_WIN_CODEPAGE", value);
     }
   }
@@ -547,14 +563,6 @@ function initFilterParams(dependenciesFile: string) {
 
 const kQuartoFilterMarker = "quarto";
 const kQuartoCiteProcMarker = "citeproc";
-
-export type QuartoFilterSpec = {
-  // these are filters that will be sent to pandoc directly
-  quartoFilters: QuartoFilter[];
-
-  beforeQuartoFilters: QuartoFilter[];
-  afterQuartoFilters: QuartoFilter[];
-};
 
 export async function resolveFilters(
   filters: QuartoFilter[],
@@ -661,9 +669,9 @@ function citeMethod(options: PandocOptions): CiteMethod | null {
 }
 
 function pdfEngine(options: PandocOptions): string {
-  const pdfEngine =
-    (options.flags?.pdfEngine || options.metadata?.[kPdfEngine] as string ||
-      "pdflatex");
+  const pdfEngine = options.flags?.pdfEngine ||
+    options.metadata?.[kPdfEngine] as string ||
+    "pdflatex";
   return pdfEngine;
 }
 

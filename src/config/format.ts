@@ -1,11 +1,10 @@
 /*
-* format.ts
-*
-* Copyright (C) 2020-2022 Posit Software, PBC
-*
-*/
+ * format.ts
+ *
+ * Copyright (C) 2020-2022 Posit Software, PBC
+ */
 
-import { kPreferHtml } from "../config/constants.ts";
+import { kBaseFormat, kPreferHtml } from "../config/constants.ts";
 import { Format, FormatPandoc } from "./types.ts";
 
 export function isPdfOutput(format: string): boolean;
@@ -152,7 +151,7 @@ function isFormatTo(format: FormatPandoc, to: string) {
 }
 
 export function isMarkdownOutput(
-  format: FormatPandoc,
+  format: Format,
   flavors = [
     "markdown",
     "markdown_github",
@@ -165,13 +164,13 @@ export function isMarkdownOutput(
     "markua",
   ],
 ) {
-  const to = (format.to || "").replace(/[\+\-_].*$/, "");
-  return flavors.includes(to) || isIpynbOutput(format);
+  const to = format.identifier[kBaseFormat] || "html";
+  return flavors.includes(to) || isIpynbOutput(format.pandoc);
 }
 
 export function isHtmlCompatible(format: Format) {
   return isHtmlOutput(format.pandoc) ||
-    (isMarkdownOutput(format.pandoc) && format.render[kPreferHtml]) ||
+    (isMarkdownOutput(format) && format.render[kPreferHtml]) ||
     isIpynbOutput(format.pandoc);
 }
 

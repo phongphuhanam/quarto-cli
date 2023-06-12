@@ -11,6 +11,7 @@ import { mergeConfigs } from "../../core/config.ts";
 import { texSafeFilename } from "../../core/tex.ts";
 
 import {
+  kBibliography,
   kCapBottom,
   kCapLoc,
   kCapTop,
@@ -42,7 +43,7 @@ import { Format, FormatExtras, PandocFlags } from "../../config/types.ts";
 import { createFormat } from "../formats-shared.ts";
 
 import { RenderedFile, RenderServices } from "../../command/render/types.ts";
-import { ProjectContext } from "../../project/types.ts";
+import { ProjectConfig, ProjectContext } from "../../project/types.ts";
 import { BookExtension } from "../../project/types/book/book-shared.ts";
 
 import { readLines } from "io/buffer.ts";
@@ -83,7 +84,28 @@ export function latexFormat(displayName: string): Format {
   return createFormat(
     displayName,
     "tex",
-    createPdfFormat(displayName),
+    mergeConfigs(
+      createPdfFormat(displayName),
+      {
+        extensions: {
+          book: {
+            onSingleFilePreRender: (
+              format: Format,
+              _config?: ProjectConfig,
+            ) => {
+              // If we're targeting LaTeX output, be sure to keep
+              // the supporting files around (since we're not building
+              // them into a PDF)
+              format.render[kKeepTex] = true;
+              return format;
+            },
+            formatOutputDirectory: () => {
+              return "book-latex";
+            },
+          },
+        },
+      },
+    ),
   );
 }
 
@@ -265,6 +287,7 @@ function createPdfFormat(
 }
 
 const pdfBookExtension: BookExtension = {
+  selfContainedOutput: true,
   onSingleFilePostRender: (
     project: ProjectContext,
     renderedFile: RenderedFile,
@@ -293,10 +316,20 @@ function pdfLatexPostProcessor(
   return async (output: string) => {
     const lineProcessors: LineProcessor[] = [
       sidecaptionLineProcessor(),
-      calloutFigureHoldLineProcessor(),
+      calloutFloatHoldLineProcessor(),
     ];
 
-    const marginCites = format.metadata[kCitationLocation];
+    if (format.pandoc[kCiteMethod] === "biblatex") {
+      lineProcessors.push(bibLatexBibligraphyRefsDivProcessor());
+    } else if (format.pandoc[kCiteMethod] === "natbib") {
+      lineProcessors.push(
+        natbibBibligraphyRefsDivProcessor(
+          format.metadata[kBibliography] as string[] | undefined,
+        ),
+      );
+    }
+
+    const marginCites = format.metadata[kCitationLocation] === "margin";
     const renderedCites = {};
     if (marginCites) {
       // Based upon the cite method, post process the file to
@@ -335,6 +368,7 @@ function pdfLatexPostProcessor(
     lineProcessors.push(captionFootnoteLineProcessor());
     lineProcessors.push(codeAnnotationPostProcessor());
     lineProcessors.push(codeListAnnotationPostProcessor());
+    lineProcessors.push(longTableSidenoteProcessor());
 
     await processLines(output, lineProcessors, temp);
     if (Object.keys(renderedCites).length > 0) {
@@ -368,6 +402,14 @@ async function processLines(
   // The temp file we generate into
   const outputFile = temp.createFile({ suffix: ".tex" });
   const file = await Deno.open(inputFile);
+  // Preserve the existing permissions as we'll replace
+  let mode;
+  if (Deno.build.os !== "windows") {
+    const stat = Deno.statSync(inputFile);
+    if (stat.mode !== null) {
+      mode = stat.mode;
+    }
+  }
   try {
     for await (const line of readLines(file)) {
       let processedLine: string | undefined = line;
@@ -382,6 +424,7 @@ async function processLines(
       if (processedLine !== undefined) {
         Deno.writeTextFileSync(outputFile, processedLine + "\n", {
           append: true,
+          mode,
         });
       }
     }
@@ -577,7 +620,98 @@ const captionFootnoteLineProcessor = () => {
   };
 };
 
-const calloutFigureHoldLineProcessor = () => {
+const processLongTableSidenotes = (latexLongTable: string) => {
+  const sideNoteMarker = "\\sidenote{\\footnotesize ";
+  let strProcessing = latexLongTable;
+  const strOutput: string[] = [];
+  const sidenotes: string[] = [];
+
+  let sidenotePos = strProcessing.indexOf(sideNoteMarker);
+  while (sidenotePos > -1) {
+    strOutput.push(strProcessing.substring(0, sidenotePos));
+
+    const remainingStr = strProcessing.substring(
+      sidenotePos + sideNoteMarker.length,
+    );
+    let escaped = false;
+    let sideNoteEnd = -1;
+    for (let i = 0; i < remainingStr.length; i++) {
+      const ch = remainingStr[i];
+      if (ch === "\\") {
+        escaped = true;
+      } else {
+        if (!escaped && ch === "}") {
+          sideNoteEnd = i;
+          break;
+        } else {
+          escaped = false;
+        }
+      }
+    }
+
+    if (sideNoteEnd > -1) {
+      strOutput.push("\\sidenotemark{}");
+      const contents = remainingStr.substring(0, sideNoteEnd);
+      sidenotes.push(contents);
+      strProcessing = remainingStr.substring(sideNoteEnd + 1);
+      sidenotePos = strProcessing.indexOf(sideNoteMarker);
+    } else {
+      strOutput.push(remainingStr);
+    }
+  }
+
+  // Ensure that we inject sidenotes after the longtable
+  const endTable = "\\end{longtable}";
+  const endPos = strProcessing.indexOf(endTable);
+  const prefix = strProcessing.substring(0, endPos + endTable.length);
+  const suffix = strProcessing.substring(
+    endPos + endTable.length,
+    strProcessing.length,
+  );
+
+  strOutput.push(prefix);
+  for (const note of sidenotes) {
+    strOutput.push(`\\sidenotetext{${note}}\n`);
+  }
+  if (suffix) {
+    strOutput.push(suffix);
+  }
+
+  return strOutput.join("");
+};
+
+const longTableSidenoteProcessor = () => {
+  let state: "scanning" | "capturing" = "scanning";
+  let capturedLines: string[] = [];
+  return (line: string): string | undefined => {
+    switch (state) {
+      case "scanning":
+        if (line.match(/^\\begin{longtable}.*$/)) {
+          state = "capturing";
+          capturedLines = [line];
+          return undefined;
+        } else {
+          return line;
+        }
+      case "capturing":
+        capturedLines.push(line);
+        if (line.match(/\\end{longtable}/)) {
+          state = "scanning";
+
+          // read the whole figure and clear any capture state
+          const lines = capturedLines.join("\n");
+          capturedLines = [];
+
+          // Process the captions and relocate footnotes
+          return processLongTableSidenotes(lines);
+        } else {
+          return undefined;
+        }
+    }
+  };
+};
+
+const calloutFloatHoldLineProcessor = () => {
   let state: "scanning" | "replacing" = "scanning";
   return (line: string): string | undefined => {
     switch (state) {
@@ -595,9 +729,52 @@ const calloutFigureHoldLineProcessor = () => {
           return line;
         } else if (line.match(/^\\begin{figure}$/)) {
           return "\\begin{figure}[H]";
+        } else if (line.match(/^\\begin{codelisting}$/)) {
+          return "\\begin{codelisting}[H]";
         } else {
           return line;
         }
+    }
+  };
+};
+
+const kQuartoBibPlaceholderRegex = "%bib-loc-124C8010";
+const bibLatexBibligraphyRefsDivProcessor = () => {
+  let hasRefsDiv = false;
+  return (line: string): string | undefined => {
+    if (line === kQuartoBibPlaceholderRegex) {
+      if (!hasRefsDiv) {
+        hasRefsDiv = true;
+        return "\\printbibliography[heading=none]";
+      } else {
+        // already seen a refs div, just ignore this one
+        return undefined;
+      }
+    } else if (hasRefsDiv && line.match(/^\\printbibliography$/)) {
+      return undefined;
+    } else {
+      return line;
+    }
+  };
+};
+
+const natbibBibligraphyRefsDivProcessor = (bibs?: string[]) => {
+  let hasRefsDiv = false;
+  return (line: string): string | undefined => {
+    if (line === kQuartoBibPlaceholderRegex) {
+      if (bibs && !hasRefsDiv) {
+        hasRefsDiv = true;
+        return `\\renewcommand{\\bibsection}{}\n\\bibliography{${
+          bibs.join(",")
+        }}`;
+      } else {
+        // already seen a refs div, just ignore this one
+        return undefined;
+      }
+    } else if (hasRefsDiv && line.match(/^\s*\\bibliography{.*}$/)) {
+      return undefined;
+    } else {
+      return line;
     }
   };
 };
@@ -625,7 +802,6 @@ const suppressNatbibBibliographyLineProcessor = () => {
 
 // {?quarto-cite:(id)}
 const kQuartoCiteRegex = /{\?quarto-cite:(.*?)}/g;
-
 const bibLatexCiteLineProcessor = () => {
   return (line: string): string | undefined => {
     return line.replaceAll(kQuartoCiteRegex, (_match, citeKey) => {
@@ -745,8 +921,8 @@ const placePandocBibliographyEntries = (
 };
 
 const kCodeAnnotationRegex =
-  /(.*)\\CommentTok\{\\\# \\textless\{\}(\d)\\textgreater\{\}\s*\}$/gm;
-const kCodePlainAnnotationRegex = /(.*)% \((\d)\)$/g;
+  /(.*)\\CommentTok\{.* \\textless\{\}(\d+)\\textgreater\{\}.*\}$/gm;
+const kCodePlainAnnotationRegex = /(.*)% \((\d+)\)$/g;
 const codeAnnotationPostProcessor = () => {
   let lastAnnotation: string | undefined;
 

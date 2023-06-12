@@ -7,7 +7,6 @@
 
 import { expandGlobSync } from "../../src/core/deno/expand-glob.ts";
 import { testQuartoCmd, Verify } from "../test.ts";
-
 import { initYamlIntelligenceResourcesFromFilesystem } from "../../src/core/schema/utils.ts";
 import {
   initState,
@@ -19,15 +18,17 @@ import { parse } from "encoding/yaml.ts";
 import { cleanoutput } from "./render/render.ts";
 import {
   ensureDocxRegexMatches,
+  ensurePptxRegexMatches,
   ensureFileRegexMatches,
   ensureHtmlElements,
+  fileExists,
   noErrors,
   noErrorsOrWarnings,
 } from "../verify.ts";
 import { readYamlFromMarkdown } from "../../src/core/yaml.ts";
 import { outputForInput } from "../utils.ts";
-import { jupyterToMarkdown } from "../../src/core/jupyter/jupyter.ts";
 import { jupyterNotebookToMarkdown } from "../../src/command/convert/jupyter.ts";
+import { dirname, join, relative } from "path/mod.ts";
 
 async function fullInit() {
   await initYamlIntelligenceResourcesFromFilesystem();
@@ -43,6 +44,7 @@ async function guessFormat(fileName: string): Promise<string[]> {
       const src = cell.source.value.replaceAll(/^---$/mg, "");
       const yaml = parse(src);
       if (yaml && typeof yaml === "object") {
+        // deno-lint-ignore no-explicit-any
         const format = (yaml as Record<string, any>).format;
         if (typeof format === "object") {
           for (
@@ -85,6 +87,7 @@ function resolveTestSpecs(
     ensureHtmlElements,
     ensureFileRegexMatches,
     ensureDocxRegexMatches,
+    ensurePptxRegexMatches,
   };
 
   for (const [format, testObj] of Object.entries(specs)) {
@@ -99,8 +102,24 @@ function resolveTestSpecs(
           checkWarnings = false;
           verifyFns.push(noErrors);
         } else {
-          if (verifyMap[key]) {
-            const outputFile = outputForInput(input, format);
+          const outputFile = outputForInput(input, format);
+          if (key === "fileExists") {
+            for (
+              const [path, file] of Object.entries(
+                value as Record<string, string>,
+              )
+            ) {
+              if (path === "outputPath") {
+                verifyFns.push(
+                  fileExists(join(dirname(outputFile.outputPath), file)),
+                );
+              } else if (path === "supportPath") {
+                verifyFns.push(
+                  fileExists(join(outputFile.supportPath, file)),
+                );
+              }
+            }
+          } else if (verifyMap[key]) {
             verifyFns.push(verifyMap[key](outputFile.outputPath, ...value));
           }
         }
@@ -129,7 +148,7 @@ await initYamlIntelligenceResourcesFromFilesystem();
 for (
   const { path: fileName } of globOutput
 ) {
-  const input = fileName;
+  const input = relative(Deno.cwd(), fileName);
 
   const metadata = input.endsWith("qmd")
     ? readYamlFromMarkdown(Deno.readTextFileSync(input))

@@ -1,9 +1,8 @@
 /*
-* preview.ts
-*
-* Copyright (C) 2020-2022 Posit Software, PBC
-*
-*/
+ * preview.ts
+ *
+ * Copyright (C) 2020-2022 Posit Software, PBC
+ */
 
 import { info, warning } from "log/mod.ts";
 import {
@@ -24,10 +23,10 @@ import { openUrl } from "../../core/shell.ts";
 import {
   httpContentResponse,
   httpFileRequestHandler,
-  HttpFileRequestOptions,
   isBrowserPreviewable,
   serveRedirect,
 } from "../../core/http.ts";
+import { HttpFileRequestOptions } from "../../core/http-types.ts";
 import { HttpDevServer, httpDevServer } from "../../core/http-devserver.ts";
 import {
   isHtmlContent,
@@ -38,17 +37,18 @@ import {
 import { PromiseQueue } from "../../core/promise.ts";
 import { inputFilesDir } from "../../core/render.ts";
 
+import { kQuartoRenderCommand } from "../render/constants.ts";
+
 import {
-  kQuartoRenderCommand,
   previewUnableToRenderResponse,
   previewURL,
   printBrowsePreviewMessage,
   printWatchingForChangesMessage,
   render,
-  renderServices,
   renderToken,
   rswURL,
 } from "../render/render-shared.ts";
+import { renderServices } from "../render/render-services.ts";
 import {
   RenderFlags,
   RenderResult,
@@ -68,13 +68,14 @@ import {
 import {
   kProjectWatchInputs,
   ProjectContext,
-  resolvePreviewOptions,
+  ProjectPreview,
 } from "../../project/types.ts";
 import { projectOutputDir } from "../../project/project-shared.ts";
 import { projectContext } from "../../project/project-context.ts";
-import { pathWithForwardSlashes } from "../../core/path.ts";
+import { normalizePath, pathWithForwardSlashes } from "../../core/path.ts";
 import {
   isJupyterHubServer,
+  isRStudio,
   isRStudioServer,
   isRStudioWorkbench,
   isVSCodeServer,
@@ -83,6 +84,7 @@ import {
 import { isJupyterNotebook } from "../../core/jupyter/jupyter.ts";
 import { watchForFileChanges } from "../../core/watch.ts";
 import {
+  formatResourcePath,
   pandocBinaryPath,
   resourcePath,
   textHighlightThemePath,
@@ -94,9 +96,45 @@ import {
   extensionFilesFromDirs,
   inputExtensionDirs,
 } from "../../extension/extension.ts";
-import { kOutputFile } from "../../config/constants.ts";
+import {
+  kBaseFormat,
+  kOutputFile,
+  kPreviewMode,
+  kPreviewModeRaw,
+} from "../../config/constants.ts";
 import { isJatsOutput } from "../../config/format.ts";
-import { kDefaultProjectFileContents } from "../../project/types/project-default.ts";
+import { mergeConfigs } from "../../core/config.ts";
+import { kLocalhost } from "../../core/port-consts.ts";
+import { findOpenPort, waitForPort } from "../../core/port.ts";
+
+export async function resolvePreviewOptions(
+  options: ProjectPreview,
+  project?: ProjectContext,
+): Promise<ProjectPreview> {
+  // start with project options if we have them
+  if (project?.config?.project.preview) {
+    options = mergeConfigs(project.config.project.preview, options);
+  }
+  // provide defaults
+  const resolved = mergeConfigs({
+    host: kLocalhost,
+    browser: true,
+    [kProjectWatchInputs]: !isRStudio(),
+    timeout: 0,
+    navigate: true,
+  }, options) as ProjectPreview;
+
+  // if a specific port is requested then wait for it up to 5 seconds
+  if (resolved.port) {
+    if (!await waitForPort({ port: resolved.port, hostname: resolved.host })) {
+      throw new Error(`Requested port ${options.port} is already in use.`);
+    }
+  } else {
+    resolved.port = findOpenPort();
+  }
+
+  return resolved;
+}
 
 interface PreviewOptions {
   port?: number;
@@ -168,7 +206,7 @@ export async function preview(
   const handler = isPdfContent(result.outputFile)
     ? pdfFileRequestHandler(
       result.outputFile,
-      Deno.realPathSync(file),
+      normalizePath(file),
       flags,
       result.format,
       options.port!,
@@ -178,7 +216,7 @@ export async function preview(
     : project
     ? projectHtmlFileRequestHandler(
       project,
-      Deno.realPathSync(file),
+      normalizePath(file),
       flags,
       result.format,
       reloader,
@@ -186,7 +224,7 @@ export async function preview(
     )
     : htmlFileRequestHandler(
       result.outputFile,
-      Deno.realPathSync(file),
+      normalizePath(file),
       flags,
       result.format,
       reloader,
@@ -368,7 +406,7 @@ async function renderForPreview(
   // determine files to watch for reload -- take the resource
   // files detected during render, chase down additional references
   // in css files, then fitler out the _files dir
-  file = Deno.realPathSync(file);
+  file = normalizePath(file);
   const filesDir = join(dirname(file), inputFilesDir(file));
   const resourceFiles = renderResult.files.reduce(
     (resourceFiles: string[], file: RenderResultFile) => {
@@ -399,7 +437,7 @@ async function renderForPreview(
           if (!isAbsolute(extensionFile)) {
             const extensionFullPath = join(dirname(file.input), extensionFile);
             if (existsSync(extensionFullPath)) {
-              extensionFiles.push(Deno.realPathSync(extensionFullPath));
+              extensionFiles.push(normalizePath(extensionFullPath));
             }
           }
         });
@@ -522,7 +560,7 @@ function previewWatcher(watches: Watch[]): Watcher {
     return {
       ...watch,
       files: watch.files.filter(existsSync).map((file) => {
-        return Deno.realPathSync(file);
+        return normalizePath(file);
       }),
     };
   });
@@ -635,7 +673,7 @@ function htmlFileRequestHandlerOptions(
         if (
           prevReq &&
           existsSync(prevReq.path) &&
-          Deno.realPathSync(prevReq.path) === Deno.realPathSync(inputFile) &&
+          normalizePath(prevReq.path) === normalizePath(inputFile) &&
           await previewRenderRequestIsCompatible(prevReq, flags)
         ) {
           // don't wait for the promise so the
@@ -651,6 +689,9 @@ function htmlFileRequestHandlerOptions(
     },
     onFile: async (file: string, req: Request) => {
       const staticResponse = await staticResource(format, baseDir, file);
+
+      const rawPreviewMode = format.metadata[kPreviewMode] === kPreviewModeRaw;
+
       if (staticResponse) {
         const resolveBody = () => {
           if (staticResponse.injectClient) {
@@ -680,12 +721,21 @@ function htmlFileRequestHandlerOptions(
         const fileContents = await Deno.readFile(file);
         return reloader.injectClient(req, fileContents, inputFile);
       } else if (isTextContent(file)) {
-        if (isJatsOutput(format.pandoc)) {
+        if (!rawPreviewMode && isJatsOutput(format.pandoc)) {
           const xml = await jatsPreviewXml(file, req);
           return {
             contentType: kTextXml,
             body: new TextEncoder().encode(xml),
           };
+        } else if (
+          !rawPreviewMode && format.identifier[kBaseFormat] === "gfm"
+        ) {
+          const html = await gfmPreview(file, req);
+          return reloader.injectClient(
+            req,
+            new TextEncoder().encode(html),
+            inputFile,
+          );
         } else {
           const html = await textPreviewHtml(file, req);
           const fileContents = new TextEncoder().encode(html);
@@ -763,16 +813,20 @@ function resultRequiresSync(
     !ld.isEqual(result.resourceFiles, lastResult.resourceFiles);
 }
 
+function darkHighlightStyle(request: Request) {
+  const kQuartoPreviewThemeCategory = "quartoPreviewThemeCategory";
+  const themeCategory = new URL(request.url).searchParams.get(
+    kQuartoPreviewThemeCategory,
+  );
+  return themeCategory && themeCategory !== "light";
+}
+
 // run pandoc and its syntax highlighter over the passed file
 // (use the file's extension as its language)
 async function textPreviewHtml(file: string, req: Request) {
   // see if we are in dark mode
-  const kQuartoPreviewThemeCategory = "quartoPreviewThemeCategory";
-  const themeCategory = new URL(req.url).searchParams.get(
-    kQuartoPreviewThemeCategory,
-  );
-  const darkHighlightStyle = themeCategory && themeCategory !== "light";
-  const backgroundColor = darkHighlightStyle ? "rgb(30,30,30)" : "#FFFFFF";
+  const darkMode = darkHighlightStyle(req);
+  const backgroundColor = darkMode ? "rgb(30,30,30)" : "#FFFFFF";
 
   // generate the markdown
   const frontMatter = ["---"];
@@ -802,7 +856,7 @@ async function textPreviewHtml(file: string, req: Request) {
   cmd.push("--to", "html");
   cmd.push(
     "--highlight-style",
-    textHighlightThemePath("atom-one", darkHighlightStyle ? "dark" : "light")!,
+    textHighlightThemePath("atom-one", darkMode ? "dark" : "light")!,
   );
   cmd.push("--standalone");
   const result = await execProcess({
@@ -886,4 +940,96 @@ async function jatsPreviewXml(file: string, _request: Request) {
   );
 
   return xmlContents;
+}
+
+async function gfmPreview(file: string, request: Request) {
+  const workingDir = Deno.makeTempDirSync();
+  try {
+    // dark mode?
+    const darkMode = darkHighlightStyle(request);
+
+    // Use a custom template that simplifies things
+    const template = formatResourcePath("gfm", "template.html");
+
+    // Add a filter
+    const filter = formatResourcePath("gfm", "mermaid.lua");
+
+    // Inject Mermaid files
+    const mermaidJs = formatResourcePath(
+      "html",
+      join("mermaid", "mermaid.min.js"),
+    );
+
+    // Files to be included verbatim in head
+    const includeInHeader: string[] = [];
+
+    // Add JS files
+    for (const path of [mermaidJs]) {
+      const js = Deno.readTextFileSync(path);
+      const contents = `<script type="text/javascript">\n${js}\n</script>`;
+      const target = join(workingDir, basename(path));
+      Deno.writeTextFileSync(target, contents);
+      includeInHeader.push(target);
+    }
+
+    // JS init
+    const jsInit = `
+<script>
+  mermaid.initialize({startOnLoad:true, theme: '${
+      darkMode ? "dark" : "default"
+    }'});
+</script>`;
+
+    // Inject custom HTML into the header
+    const css = formatResourcePath(
+      "gfm",
+      join(
+        "github-markdown-css",
+        darkMode ? "github-markdown-dark.css" : "github-markdown-light.css",
+      ),
+    );
+    const cssTempFile = join(workingDir, "github.css");
+    const cssContents = `<style>\n${
+      Deno.readTextFileSync(css)
+    }\n</style>\n${jsInit}`;
+    Deno.writeTextFileSync(cssTempFile, cssContents);
+    includeInHeader.push(cssTempFile);
+
+    // Inject GFM style code cell theming
+    const highlightPath = textHighlightThemePath(
+      "github",
+      darkMode ? "dark" : "light",
+    );
+
+    const cmd = [pandocBinaryPath()];
+    cmd.push("-f");
+    cmd.push("gfm");
+    cmd.push("-t");
+    cmd.push("html");
+    cmd.push("--template");
+    cmd.push(template);
+    includeInHeader.forEach((include) => {
+      cmd.push("--include-in-header");
+      cmd.push(include);
+    });
+    cmd.push("--lua-filter");
+    cmd.push(filter);
+    if (highlightPath) {
+      cmd.push("--highlight-style");
+      cmd.push(highlightPath);
+    }
+    const result = await execProcess(
+      { cmd, stdout: "piped", stderr: "piped" },
+      Deno.readTextFileSync(file),
+    );
+    if (result.success) {
+      return result.stdout;
+    } else {
+      throw new Error(
+        `Failed to render citation: error code ${result.code}\n${result.stderr}`,
+      );
+    }
+  } finally {
+    Deno.removeSync(workingDir, { recursive: true });
+  }
 }

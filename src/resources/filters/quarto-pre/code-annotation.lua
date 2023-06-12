@@ -39,6 +39,7 @@ local kLangCommentChars = {
   d3 = {"//"},
   node = {"//"},
   sass = {"//"},
+  scss = {"//"},
   coffee = {"#"},
   go = {"//"},
   asy = {"//"},
@@ -49,7 +50,12 @@ local kLangCommentChars = {
   yaml = {"#"},
   json = {"//"},
   latex = {"%"},
-  typescript = {"//"}
+  typescript = {"//"},
+  swift = { "//" },
+  javascript = { "//"},
+  elm = { "#" },
+  vhdl = { "--"}
+
 }
 
 local kCodeAnnotationsParam = 'code-annotations'
@@ -67,6 +73,10 @@ local hasAnnotations = false;
 
 local kCellAnnotationClass = "cell-annotation"
 
+
+function isAnnotationCell(el) 
+  return el and el.t == "Div" and el.attr.classes:includes(kCellAnnotationClass)
+end
 -- annotations appear at the end of the line and are of the form
 -- # <1> 
 -- where they start with a comment character valid for that code cell
@@ -114,7 +124,7 @@ local function annoteProvider(lang)
         return line:gsub(expression.strip.prefix .. annoteId .. expression.strip.suffix, "")
       end,
       replaceAnnotation = function(line, annoteId, replacement)
-        return line:gsub(expression.strip.prefix .. annoteId .. expression.strip.suffix, replacement)
+        return line:gsub(patternEscape(expression.strip.prefix .. annoteId .. expression.strip.suffix), replacement)
       end,
       createComment = function(value) 
         if #commentChars == 0 then
@@ -142,6 +152,11 @@ local function latexListPlaceholder(number)
   return '5CB6E08D-list-annote-' .. number 
 end
 
+local function toLines(s)
+  if s:sub(-1)~="\n" then s=s.."\n" end
+  return s:gmatch("(.-)\n")
+end
+
 -- Finds annotations in a code cell and returns 
 -- the annotations as well as a code cell that
 -- removes the annotations
@@ -153,12 +168,14 @@ local function resolveCellAnnotes(codeBlockEl, processAnnotation)
   if annotationProvider ~= nil then
     local annotations = {}
     local code = codeBlockEl.text
-    local lines = split(code, "\n")
+    
     local outputs = pandoc.List({})
-    for i, line in ipairs(lines) do
+    local i = 1
+    for line in toLines(code) do
   
       -- Look and annotation
       local annoteNumber = annotationProvider.annotationNumber(line)
+      
       if annoteNumber then
         -- Capture the annotation number and strip it
         local annoteId = toAnnoteId(annoteNumber)
@@ -172,11 +189,12 @@ local function resolveCellAnnotes(codeBlockEl, processAnnotation)
       else
         outputs:insert(line)
       end
+      i = i + 1
     end    
 
     -- if we capture annotations, then replace the code source
     -- code, stripping annotation comments
-    if #annotations then
+    if annotations and next(annotations) ~= nil then
       local outputText = ""
       for i, output in ipairs(outputs) do
         outputText = outputText .. output .. '\n'
@@ -278,10 +296,20 @@ function processLaTeXAnnotation(line, annoteNumber, annotationProvider)
   end
 end
 
+function processAsciidocAnnotation(line, annoteNumber, annotationProvider)
+  if param(kCodeAnnotationsParam) == kCodeAnnotationStyleNone then
+    local replaced = annotationProvider.replaceAnnotation(line, annoteNumber, '') 
+    return replaced
+  else
+    local replaced = annotationProvider.replaceAnnotation(line, annoteNumber, " <" .. tostring(annoteNumber) .. ">") 
+    return replaced
+  end
+end
+
 function processAnnotation(line, annoteNumber, annotationProvider)
     -- For all other formats, just strip the annotation- the definition list is converted
     -- to be based upon line numbers. 
-    local stripped = annotationProvider.stripAnnotation(line, annoteNumber)
+        local stripped = annotationProvider.stripAnnotation(line, annoteNumber)
     return stripped
 end
 
@@ -366,6 +394,8 @@ function code()
           local annotationProcessor = processAnnotation
           if _quarto.format.isLatexOutput() then
             annotationProcessor = processLaTeXAnnotation
+          elseif _quarto.format.isAsciiDocOutput() then
+            annotationProcessor = processAsciidocAnnotation
           end
 
           -- resolve annotations
@@ -387,9 +417,12 @@ function code()
 
         for i, block in ipairs(blocks) do
           if block.t == 'Div' and block.attr.classes:find('cell') then
-            -- walk to find the code and 
+            -- Process executable code blocks 
+            -- In the case of executable code blocks, we actually want
+            -- to shift the OL up above the output, so we hang onto this outer
+            -- cell so we can move the OL up into it if there are annotations
             local processedAnnotation = false
-            local resolvedBlock = pandoc.walk_block(block, {
+            local resolvedBlock = _quarto.ast.walk(block, {
               CodeBlock = function(el)
                 if el.attr.classes:find('cell-code') then
                   
@@ -406,13 +439,23 @@ function code()
               end
             })
             if processedAnnotation then
+              -- we found annotations, so hand onto this cell
               pendingCodeCell = resolvedBlock
             else
+              -- no annotations, just output it
               outputBlock(resolvedBlock)
             end
           elseif block.t == 'CodeBlock'  then
             -- don't process code cell output here - we'll get it above
+            -- This processes non-executable code blocks
             if not block.attr.classes:find('cell-code') then
+
+              -- If there is a pending code cell and we get here, just
+              -- output the pending code cell and continue
+              if pendingCodeCell then
+                outputBlock(pendingCodeCell)
+                clearPending()
+              end
 
               local cellId = resolveCellId(block.attr.identifier)
               local codeCell = processCodeCell(block, cellId)
@@ -445,6 +488,8 @@ function code()
                 local term = ""
                 if _quarto.format.isLatexOutput() then
                   term = latexListPlaceholder(annotationNumber)
+                elseif _quarto.format.isAsciiDocOutput() then
+                  term = "<" .. tostring(annotationNumber) .. ">"
                 else
                   if lineNumMeta.count == 1 then
                     term = language[kCodeLine] .. " " .. lineNumMeta.text;
@@ -481,7 +526,19 @@ function code()
             end
 
             -- add the definition list
-            local dl = pandoc.DefinitionList(items)
+            local dl
+            if _quarto.format.isAsciiDocOutput() then
+              local formatted = pandoc.List()
+              for _i,v in ipairs(items) do
+                local annotationMarker = v[1] .. ' '
+                local definition = v[2]
+                tprepend(definition.content, {annotationMarker})
+                formatted:insert(definition)
+              end
+              dl = pandoc.Div(formatted)
+            else
+              dl = pandoc.DefinitionList(items)
+            end
 
             -- if there is a pending code cell, then insert into that and add it
             if codeAnnotations ~= kCodeAnnotationStyleNone then
@@ -494,6 +551,11 @@ function code()
               else
                 outputBlockClearPending(dl)
               end
+            else
+              if pendingCodeCell then
+                outputBlock(pendingCodeCell)
+              end
+              clearPending();
             end
           else
             outputBlockClearPending(block)

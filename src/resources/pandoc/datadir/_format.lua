@@ -12,7 +12,6 @@ local function tcontains(t,value)
   return false
 end
 
-
 local function isRaw(el)
   return el.t == "RawBlock" or el.t == "RawInline"
 end
@@ -29,6 +28,10 @@ end
 local function isLatexOutput()
   return FORMAT == "latex" or FORMAT == "beamer" or FORMAT == "pdf"
 end
+
+local function isAsciiDocOutput()
+  return FORMAT == "asciidoc" or FORMAT == "asciidoctor"
+end 
 
 local function isBeamerOutput()
   return FORMAT == "beamer"
@@ -101,6 +104,10 @@ local function isBibliographyOutput()
   return tcontains(formats, FORMAT)
 end
 
+local function is_docusaurus_output()
+  return string.match(param("custom-writer", ""), "docusaurus_writer.lua$")
+end
+
 -- check for markdown output
 local function isMarkdownOutput()
   local formats = {
@@ -114,12 +121,12 @@ local function isMarkdownOutput()
     "commonmark_x",
     "markua"
   }
-  return tcontains(formats, FORMAT)
+  return tcontains(formats, FORMAT) or is_docusaurus_output()
 end
 
 -- check for markdown with raw_html enabled
 local function isMarkdownWithHtmlOutput()
-  return isMarkdownOutput() and tcontains(PANDOC_WRITER_OPTIONS.extensions, "raw_html")
+  return (isMarkdownOutput() and tcontains(PANDOC_WRITER_OPTIONS.extensions, "raw_html")) or is_docusaurus_output()
 end
 
 -- check for ipynb output
@@ -138,6 +145,38 @@ local function isHtmlOutput()
     "epub3"
   }
   return tcontains(formats, FORMAT) or isHtmlSlideOutput()
+end
+
+local function parse_format(raw_format)
+  local pattern = "^([%a_]+)([-+_%a]*)"
+  local i, j, format, extensions = raw_format:find(pattern)
+  if format == nil then
+    error("Warning: Invalid format " .. raw_format .. ". Assuming 'markdown'.")
+    return {
+      format = "markdown",
+      extensions = {}
+    }
+  end
+
+  local result = {
+    format = format,
+    extensions = {}
+  }
+
+  local sign_table = {
+    ["-"] = false,
+    ["+"] = true
+  }
+
+  if extensions ~= nil then
+    while #extensions > 0 do
+      local i, j, sign, variant = extensions:find("^([-+])([%a_]+)")
+      result.extensions[variant] = sign_table[sign]
+      extensions = extensions:sub(j+1)      
+    end
+  end
+
+  return result
 end
 
 -- we have some special rules to allow formats to behave more intuitively
@@ -163,6 +202,8 @@ local function isFormat(to)
     -- markdown: markdown*, commonmark*, gfm, markua
     elseif to == "markdown" then
       return isMarkdownOutput()
+    elseif to == "asciidoc" or to == "asciidoctor" then
+      return isAsciiDocOutput()
     else
       return false
     end 
@@ -193,6 +234,7 @@ end
 
 
 return {
+  isAsciiDocOutput = isAsciiDocOutput,
   isRawHtml = isRawHtml,
   isRawLatex = isRawLatex,
   isFormat = isFormat,
@@ -215,5 +257,7 @@ return {
   isNativeOutput = isNativeOutput,
   isJsonOutput = isJsonOutput,
   isAstOutput = isAstOutput,
-  isJatsOutput = isJatsOutput
+  isJatsOutput = isJatsOutput,
+
+  parse_format = parse_format
 }

@@ -1,9 +1,8 @@
 /*
-* book-render.ts
-*
-* Copyright (C) 2020-2022 Posit Software, PBC
-*
-*/
+ * book-render.ts
+ *
+ * Copyright (C) 2020-2022 Posit Software, PBC
+ */
 
 import { dirname, isAbsolute, join, relative } from "path/mod.ts";
 
@@ -24,6 +23,7 @@ import {
   kDoi,
   kFormatLinks,
   kHideDescription,
+  kKeepTex,
   kNumberSections,
   kOutputExt,
   kOutputFile,
@@ -34,10 +34,8 @@ import {
 import { Format, Metadata } from "../../../config/types.ts";
 import { isHtmlOutput } from "../../../config/format.ts";
 
-import {
-  PandocRenderCompletion,
-  renderPandoc,
-} from "../../../command/render/render.ts";
+import { renderPandoc } from "../../../command/render/render.ts";
+import { PandocRenderCompletion } from "../../../command/render/types.ts";
 
 import { renderContexts } from "../../../command/render/render-contexts.ts";
 
@@ -62,14 +60,10 @@ import {
   onSingleFileBookPostRender,
   onSingleFileBookPreRender,
 } from "./book-extension.ts";
-import {
-  bookConfigRenderItems,
-  bookOutputStem,
-  BookRenderItem,
-  kBookItemAppendix,
-  kBookItemPart,
-} from "./book-config.ts";
-
+import { bookConfigRenderItems } from "./book-config.ts";
+import { BookRenderItem } from "./book-types.ts";
+import { bookOutputStem } from "./book-shared.ts";
+import { kBookItemAppendix, kBookItemPart } from "./book-constants.ts";
 import {
   chapterInfoForInput,
   isListedChapter,
@@ -78,6 +72,7 @@ import {
 import {
   bookConfig,
   BookConfigKey,
+  BookExtension,
   isBookIndexPage,
   isMultiFileBookFormat,
   isNumberedChapter,
@@ -93,6 +88,7 @@ import { removePandocTo } from "../../../command/render/flags.ts";
 import { resourcePath } from "../../../core/resources.ts";
 import { PandocAttr, PartitionedMarkdown } from "../../../core/pandoc/types.ts";
 import { stringify } from "encoding/yaml.ts";
+import { waitUntilNamedLifetime } from "../../../core/lifetimes.ts";
 
 export function bookPandocRenderer(
   options: RenderOptions,
@@ -138,7 +134,8 @@ export function bookPandocRenderer(
         );
 
         // index file
-        if (isBookIndexPage(fileRelative)) {
+        const isIndex = isBookIndexPage(fileRelative);
+        if (isIndex) {
           file.recipe.format = withBookTitleMetadata(
             file.recipe.format,
             project.config,
@@ -212,6 +209,27 @@ export function bookPandocRenderer(
                 "\n\n" + partitioned.markdown;
             } else {
               file.executeResult.markdown = partitioned.markdown;
+            }
+          }
+        }
+
+        // Use the pre-render hook to allow formats to customize
+        // the format before it is rendered.
+        if (file.recipe.format.extensions?.book) {
+          const bookExtension = file.recipe.format.extensions
+            ?.book as BookExtension;
+          if (bookExtension.onMultiFilePrePrender) {
+            const result = await bookExtension.onMultiFilePrePrender(
+              isIndex,
+              file.recipe.format,
+              file.executeResult.markdown,
+              project,
+            );
+            if (result.format) {
+              file.recipe.format = result.format;
+            }
+            if (result.markdown) {
+              file.executeResult.markdown = result.markdown;
             }
           }
         }
@@ -298,43 +316,52 @@ async function renderSingleFileBook(
   files: ExecutedFile[],
   quiet: boolean,
 ): Promise<RenderedFile> {
-  // we are going to compose a single ExecutedFile from the array we have been passed
-  const executedFile = await mergeExecutedFiles(
-    project,
-    options,
-    files,
-  );
-
-  // set book title metadata
-  executedFile.recipe.format = withBookTitleMetadata(
-    executedFile.recipe.format,
-    project.config,
-  );
-
-  // call book extension if applicable
-  executedFile.recipe.format = onSingleFileBookPreRender(
-    executedFile.recipe.format,
-    project.config,
-  );
-
-  // do pandoc render
-  const renderCompletion = await renderPandoc(executedFile, quiet);
-  const renderedFormats: RenderedFormat[] = [];
-  const renderedFile = await renderCompletion.complete(renderedFormats);
-
-  // cleanup step for each executed file
-  files.forEach((file) => {
-    cleanupExecutedFile(
-      file,
-      join(project.dir, renderedFile.file),
+  const fileLifetime = await waitUntilNamedLifetime("render-file");
+  try {
+    // we are going to compose a single ExecutedFile from the array we have been passed
+    const executedFile = await mergeExecutedFiles(
+      project,
+      options,
+      files,
     );
-  });
 
-  // call book extension if applicable
-  onSingleFileBookPostRender(project, renderedFile);
+    // set book title metadata
+    executedFile.recipe.format = withBookTitleMetadata(
+      executedFile.recipe.format,
+      project.config,
+    );
 
-  // return rendered file
-  return renderedFile;
+    // call book extension if applicable
+    executedFile.recipe.format = onSingleFileBookPreRender(
+      executedFile.recipe.format,
+      project.config,
+    );
+
+    // do pandoc render
+    const renderCompletion = await renderPandoc(executedFile, quiet);
+    const renderedFormats: RenderedFormat[] = [];
+    const renderedFile = await renderCompletion.complete(renderedFormats);
+
+    // cleanup step for each executed file
+    files.forEach((file) => {
+      // Forward render cleanup options from parent format
+      file.recipe.format.render[kKeepTex] =
+        executedFile.recipe.format.render[kKeepTex];
+
+      cleanupExecutedFile(
+        file,
+        join(project.dir, renderedFile.file),
+      );
+    });
+
+    // call book extension if applicable
+    onSingleFileBookPostRender(project, renderedFile);
+
+    // return rendered file
+    return renderedFile;
+  } finally {
+    fileLifetime.cleanup();
+  }
 }
 
 async function mergeExecutedFiles(
@@ -457,10 +484,14 @@ async function mergeExecutedFiles(
           const titleBlockMarkdown = resolveTitleBlockMarkdown(
             partitioned.yaml,
           );
+          const bodyMarkdown = partitioned.yaml?.title
+            ? partitioned.srcMarkdownNoYaml
+            : partitioned.markdown;
+
           itemMarkdown = bookItemMetadata(project, item, file) +
             titleMarkdown +
             titleBlockMarkdown +
-            partitioned.markdown;
+            bodyMarkdown;
         } else {
           throw new Error(
             "Executed file not found for book item: " + item.file,
@@ -572,16 +603,36 @@ export async function bookPostRender(
     await bookBibliographyPostRender(context, incremental, websiteFiles);
     await bookCrossrefsPostRender(context, websiteFiles);
 
-    // write website files
-    websiteFiles.forEach((websiteFile) => {
-      const doctype = websiteFile.doctype;
-      const htmlOutput = (doctype ? doctype + "\n" : "") +
-        websiteFile.doc.documentElement?.outerHTML!;
-      Deno.writeTextFileSync(websiteFile.file, htmlOutput);
-    });
+    // website files are now already written on a per-file basis
+    // websiteFiles.forEach((websiteFile) => {
+    //   const doctype = websiteFile.doctype;
+    //   const htmlOutput = (doctype ? doctype + "\n" : "") +
+    //     websiteFile.doc.documentElement?.outerHTML!;
+    //   Deno.writeTextFileSync(websiteFile.file, htmlOutput);
+    // });
 
     // run standard website stuff (search, etc.)
     await websitePostRender(context, incremental, outputFiles);
+  }
+
+  // Process any post rendering
+  const outputFormats: Record<string, Format> = {};
+  outputFiles.forEach((file) => {
+    if (file.format.pandoc.to) {
+      outputFormats[file.format.pandoc.to] =
+        outputFormats[file.format.pandoc.to] || file.format;
+    }
+  });
+  for (const outputFormat of Object.values(outputFormats)) {
+    const bookExt = outputFormat.extensions?.book as BookExtension;
+    if (bookExt.bookPostRender) {
+      await bookExt.bookPostRender(
+        outputFormat,
+        context,
+        incremental,
+        outputFiles,
+      );
+    }
   }
 }
 

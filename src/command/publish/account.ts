@@ -1,9 +1,8 @@
 /*
-* account.ts
-*
-* Copyright (C) 2020-2022 Posit Software, PBC
-*
-*/
+ * account.ts
+ *
+ * Copyright (C) 2020-2022 Posit Software, PBC
+ */
 
 import { info } from "log/mod.ts";
 import {
@@ -15,13 +14,15 @@ import {
 } from "cliffy/prompt/mod.ts";
 
 import {
-  AccountToken,
   accountTokenText,
-  AccountTokenType,
   findProvider,
-  PublishProvider,
   publishProviders,
 } from "../../publish/provider.ts";
+import {
+  AccountToken,
+  AccountTokenType,
+  PublishProvider,
+} from "../../publish/provider-types.ts";
 import { PublishOptions, PublishRecord } from "../../publish/types.ts";
 import { haveArrowKeys } from "../../core/platform.ts";
 
@@ -155,7 +156,7 @@ interface ProviderAccountToken extends AccountToken {
 export async function manageAccounts() {
   // build a list of all authorized accounts
   const accounts: ProviderAccountToken[] = [];
-  for (const provider of await publishProviders()) {
+  for (const provider of publishProviders()) {
     for (const account of await provider.accountTokens()) {
       if (account.type === AccountTokenType.Authorized) {
         accounts.push({ provider: provider.name, ...account });

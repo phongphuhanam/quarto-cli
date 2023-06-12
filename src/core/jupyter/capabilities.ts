@@ -1,18 +1,18 @@
 /*
-* capabilities.ts
-*
-* Copyright (C) 2020-2022 Posit Software, PBC
-*
-*/
+ * capabilities.ts
+ *
+ * Copyright (C) 2020-2022 Posit Software, PBC
+ */
 
 import { warning } from "log/mod.ts";
-import { join } from "path/mod.ts";
-import { existsSync } from "fs/mod.ts";
+import { isAbsolute, join } from "path/mod.ts";
+import { existsSync, expandGlobSync } from "fs/mod.ts";
 
 import { isWindows } from "../platform.ts";
 import { execProcess } from "../process.ts";
 import { resourcePath } from "../resources.ts";
 import { readYamlFromString } from "../yaml.ts";
+import { which } from "../path.ts";
 
 import { JupyterCapabilities, JupyterKernelspec } from "./types.ts";
 
@@ -24,7 +24,6 @@ export async function jupyterCapabilities(kernelspec?: JupyterKernelspec) {
   const language = kernelspec?.language || kNoLanguage;
 
   if (!jupyterCapsCache.has(language)) {
-
     // if we are targeting julia then prefer the julia installed miniconda
     const juliaCaps = await getVerifiedJuliaCondaJupyterCapabilities();
     if (language === "julia" && juliaCaps) {
@@ -73,18 +72,42 @@ export async function jupyterCapabilities(kernelspec?: JupyterKernelspec) {
   return jupyterCapsCache.get(language);
 }
 
+// Does deno not have a set of S_* constants for stat?
+// https://deno.land/std@0.97.0/node/fs.ts?doc=&s=constants.S_IXUSR
+const S_IXUSR = 0o100;
+
 async function getVerifiedJuliaCondaJupyterCapabilities() {
   const home = isWindows() ? Deno.env.get("USERPROFILE") : Deno.env.get("HOME");
   if (home) {
-    const juliaPython = join(
-      home,
-      ".julia",
-      "conda",
-      "3",
-      isWindows() ? "python.exe" : join("bin", "python3")
-    );
-    if (existsSync(juliaPython)) {
-      const caps = await getJupyterCapabilities([juliaPython]);
+    const juliaCondaPath = join(home, ".julia", "conda", "3");
+    const bin = isWindows()
+      ? ["python3.exe", "python.exe"]
+      : [join("bin", "python3"), join("bin", "python")];
+
+    for (const pythonBin of bin) {
+      const juliaPython = join(
+        juliaCondaPath,
+        pythonBin,
+      );
+      if (existsSync(juliaPython)) {
+        const caps = await getJupyterCapabilities([juliaPython]);
+        if (caps?.jupyter_core) {
+          return caps;
+        }
+      }
+    }
+
+    for (
+      const path of expandGlobSync(join(juliaCondaPath, "**", "python*"), {
+        globstar: true,
+      })
+    ) {
+      // check if this is an executable binary
+      const file = Deno.statSync(path.path);
+      if (!(file.isFile && file.mode && (file.mode & S_IXUSR))) {
+        continue;
+      }
+      const caps = await getJupyterCapabilities([path.path]);
       if (caps?.jupyter_core) {
         return caps;
       }
@@ -92,15 +115,22 @@ async function getVerifiedJuliaCondaJupyterCapabilities() {
   }
 }
 
-function getQuartoJupyterCapabilities() {
-  const quartoJupyter = Deno.env.get("QUARTO_PYTHON");
+async function getQuartoJupyterCapabilities() {
+  let quartoJupyter = Deno.env.get("QUARTO_PYTHON");
   if (quartoJupyter) {
+    // if the path is relative then resolve it
+    if (!isAbsolute(quartoJupyter)) {
+      const path = await which(quartoJupyter);
+      if (path) {
+        quartoJupyter = path;
+      }
+    }
     if (existsSync(quartoJupyter)) {
       let quartoJupyterBin: string | undefined = quartoJupyter;
       if (Deno.statSync(quartoJupyter).isDirectory) {
         const bin = ["python3", "python", "python3.exe", "python.exe"]
           .find((bin) => {
-            return existsSync(join(quartoJupyter, bin));
+            return existsSync(join(quartoJupyter!, bin));
           });
         if (bin) {
           quartoJupyterBin = join(quartoJupyter, bin);

@@ -1,17 +1,29 @@
 /*
-* project-shared.ts
-*
-* Copyright (C) 2020-2022 Posit Software, PBC
-*
-*/
+ * project-shared.ts
+ *
+ * Copyright (C) 2020-2022 Posit Software, PBC
+ */
 
 import { existsSync } from "fs/exists.ts";
-import { dirname, isAbsolute, join, relative } from "path/mod.ts";
+import { dirname, isAbsolute, join, relative, SEP_PATTERN } from "path/mod.ts";
 import { kHtmlMathMethod } from "../config/constants.ts";
+import { Format, Metadata } from "../config/types.ts";
+import { mergeConfigs } from "../core/config.ts";
+import { getFrontMatterSchema } from "../core/lib/yaml-schema/front-matter.ts";
 
-import { pathWithForwardSlashes } from "../core/path.ts";
-import { kProjectOutputDir, ProjectContext } from "./types.ts";
+import { normalizePath, pathWithForwardSlashes } from "../core/path.ts";
+import { readAndValidateYamlFromFile } from "../core/schema/validated-yaml.ts";
+import { engineIgnoreGlobs } from "../execute/engine.ts";
+import { gitignoreEntries } from "./project-gitignore.ts";
+import {
+  kProjectOutputDir,
+  kProjectType,
+  ProjectConfig,
+  ProjectContext,
+} from "./types.ts";
+import { projectType } from "./types/project-types.ts";
 import { ProjectType } from "./types/types.ts";
+import { kWebsite } from "./types/website/website-constants.ts";
 
 export function projectExcludeDirs(context: ProjectContext): string[] {
   const outputDir = projectOutputDir(context);
@@ -19,6 +31,30 @@ export function projectExcludeDirs(context: ProjectContext): string[] {
     return [outputDir];
   } else {
     return [];
+  }
+}
+
+export function projectIgnoreGlobs(dir: string) {
+  return engineIgnoreGlobs().concat(
+    gitignoreEntries(dir).map((ignore) => `**/${ignore}**`),
+  );
+}
+
+export function projectFormatOutputDir(
+  format: Format,
+  context: ProjectContext,
+  type: ProjectType,
+) {
+  const projOutputDir = projectOutputDir(context);
+  if (type.formatOutputDirectory) {
+    const formatOutputDir = type.formatOutputDirectory(format);
+    if (formatOutputDir) {
+      return join(projOutputDir, formatOutputDir);
+    } else {
+      return projOutputDir;
+    }
+  } else {
+    return projOutputDir;
   }
 }
 
@@ -30,16 +66,20 @@ export function projectOutputDir(context: ProjectContext): string {
     outputDir = context.dir;
   }
   if (existsSync(outputDir)) {
-    return Deno.realPathSync(outputDir);
+    return normalizePath(outputDir);
   } else {
     return outputDir;
   }
 }
 
+export function hasProjectOutputDir(context: ProjectContext): boolean {
+  return !!context.config?.project[kProjectOutputDir];
+}
+
 export function isProjectInputFile(path: string, context: ProjectContext) {
   if (existsSync(path)) {
-    const renderPath = Deno.realPathSync(path);
-    return context.files.input.map((file) => Deno.realPathSync(file)).includes(
+    const renderPath = normalizePath(path);
+    return context.files.input.map((file) => normalizePath(file)).includes(
       renderPath,
     );
   } else {
@@ -60,8 +100,8 @@ export function projectVarsFile(dir: string): string | undefined {
 }
 
 export function projectOffset(context: ProjectContext, input: string) {
-  const projDir = Deno.realPathSync(context.dir);
-  const inputDir = Deno.realPathSync(dirname(input));
+  const projDir = normalizePath(context.dir);
+  const inputDir = normalizePath(dirname(input));
   const offset = relative(inputDir, projDir) || ".";
   return pathWithForwardSlashes(offset);
 }
@@ -106,7 +146,7 @@ export function toInputRelativePaths(
       for (let index = 0; index < collection.length; ++index) {
         const value = collection[index];
         if (Array.isArray(value) || value instanceof Object) {
-          inner(value as any);
+          inner(value);
         } else if (typeof value === "string") {
           if (value.length > 0 && !isAbsolute(value)) {
             collection[index] = fixup(value);
@@ -122,6 +162,7 @@ export function toInputRelativePaths(
         ) {
           // don't fixup html-math-method
         } else if (Array.isArray(value) || value instanceof Object) {
+          // deno-lint-ignore no-explicit-any
           inner(value as any, index);
         } else if (typeof value === "string") {
           if (value.length > 0 && !isAbsolute(value)) {
@@ -143,4 +184,134 @@ export function ignoreFieldsForProjectType(type?: ProjectType) {
     )
     : [] as string[];
   return resourceIgnoreFields;
+}
+
+export function projectIsWebsite(context?: ProjectContext): boolean {
+  if (context) {
+    const projType = projectType(context.config?.project?.[kProjectType]);
+    return projectTypeIsWebsite(projType);
+  } else {
+    return false;
+  }
+}
+
+export function projectPreviewServe(context?: ProjectContext) {
+  return context?.config?.project?.preview?.serve;
+}
+
+export function projectIsServeable(context?: ProjectContext): boolean {
+  return projectIsWebsite(context) || !!projectPreviewServe(context);
+}
+
+export function projectTypeIsWebsite(projType: ProjectType): boolean {
+  return projType.type === kWebsite || projType.inheritsType === kWebsite;
+}
+
+export function projectIsBook(context?: ProjectContext): boolean {
+  if (context) {
+    const projType = projectType(context.config?.project?.[kProjectType]);
+    return projType.type === "book";
+  } else {
+    return false;
+  }
+}
+
+export function deleteProjectMetadata(metadata: Metadata) {
+  // see if the active project type wants to filter the config printed
+  const projType = projectType(
+    (metadata as ProjectConfig).project?.[kProjectType],
+  );
+  if (projType.metadataFields) {
+    for (const field of projType.metadataFields().concat("project")) {
+      if (typeof (field) === "string") {
+        delete metadata[field];
+      } else {
+        for (const key of Object.keys(metadata)) {
+          if (field.test(key)) {
+            delete metadata[key];
+          }
+        }
+      }
+    }
+  }
+
+  // remove project config
+  delete metadata.project;
+}
+
+export function normalizeFormatYaml(yamlFormat: unknown) {
+  if (yamlFormat) {
+    if (typeof (yamlFormat) === "string") {
+      yamlFormat = {
+        [yamlFormat]: {},
+      };
+    } else if (typeof (yamlFormat) === "object") {
+      const formats = Object.keys(yamlFormat);
+      for (const format of formats) {
+        if (
+          (yamlFormat as Record<string, unknown>)[format] === "default"
+        ) {
+          (yamlFormat as Record<string, unknown>)[format] = {};
+        }
+      }
+    }
+  }
+  return (yamlFormat || {}) as Record<string, unknown>;
+}
+export async function directoryMetadataForInputFile(
+  project: ProjectContext,
+  inputDir: string,
+) {
+  const projectDir = project.dir;
+  // Finds a metadata file in a directory
+  const metadataFile = (dir: string) => {
+    return ["_metadata.yml", "_metadata.yaml"]
+      .map((file) => join(dir, file))
+      .find(existsSync);
+  };
+
+  // The path from the project dir to the input dir
+  const relativePath = relative(projectDir, inputDir);
+  const dirs = relativePath.split(SEP_PATTERN);
+
+  // The config we'll ultimately return
+  let config = {};
+
+  // Walk through each directory (starting from the project and
+  // walking deeper to the input)
+  let currentDir = projectDir;
+  const frontMatterSchema = await getFrontMatterSchema();
+  for (let i = 0; i < dirs.length; i++) {
+    const dir = dirs[i];
+    currentDir = join(currentDir, dir);
+    const file = metadataFile(currentDir);
+    if (file) {
+      // There is a metadata file, read it and merge it
+      // Note that we need to convert paths that are relative
+      // to the metadata file to be relative to input
+      const errMsg = "Directory metadata validation failed.";
+      const yaml = ((await readAndValidateYamlFromFile(
+        file,
+        frontMatterSchema,
+        errMsg,
+      )) || {}) as Record<string, unknown>;
+
+      // resolve format into expected structure
+      if (yaml.format) {
+        yaml.format = normalizeFormatYaml(yaml.format);
+      }
+
+      config = mergeConfigs(
+        config,
+        toInputRelativePaths(
+          projectType(project?.config?.project?.[kProjectType]),
+          currentDir,
+          inputDir,
+          yaml as Record<string, unknown>,
+        ),
+      );
+    }
+  }
+
+  return config;
 }

@@ -13,10 +13,6 @@ import {
   NodeType,
 } from "deno_dom/deno-dom-wasm-noinit.ts";
 
-import {
-  defaultSyntaxHighlightingClassMap,
-} from "../../../../command/render/pandoc-html.ts";
-
 import { kTitle } from "../../../../config/constants.ts";
 import { Metadata } from "../../../../config/types.ts";
 import { ProjectContext } from "../../../types.ts";
@@ -24,6 +20,15 @@ import { kImage } from "../website-constants.ts";
 import { projectOutputDir } from "../../../project-shared.ts";
 import { truncateText } from "../../../../core/text.ts";
 import { insecureHash } from "../../../../core/hash.ts";
+import { findPreviewImgEl } from "../util/discover-meta.ts";
+import { getDecodedAttribute } from "../../../../core/html.ts";
+
+import { kDefaultHighlightStyle } from "../../../../command/render/constants.ts";
+import {
+  kAbbrevs,
+  readTheme,
+} from "../../../../quarto-core/text-highlighting.ts";
+import { generateCssKeyValues } from "../../../../core/pandoc/css.ts";
 
 // The root listing key
 export const kListing = "listing";
@@ -81,6 +86,10 @@ export const kDefaultMaxDescLength = 175;
 // Table options
 export const kTableStriped = "table-striped";
 export const kTableHover = "table-hover";
+
+// Items to include
+export const kInclude = "include";
+export const kExclude = "exclude";
 
 // Fields
 export const kFieldTitle = "title";
@@ -184,9 +193,10 @@ export type ColumnType = "date" | "string" | "number" | "minutes";
 
 // Sources that provide Listing Items
 export enum ListingItemSource {
-  document = "document",
-  metadata = "metadata",
-  rawfile = "rawfile",
+  document = "document", // qmd input files
+  metadata = "metadata", // yaml metadata files
+  metadataDocument = "metadata-document", // yaml containing a list of input files
+  rawfile = "rawfile", // some other kind of file that we can't introspect much
 }
 
 // An individual listing item
@@ -208,6 +218,13 @@ export interface RenderedContents {
   title: string | undefined;
   firstPara: string | undefined;
   fullContents: string | undefined;
+  previewImage: PreviewImage | undefined;
+}
+
+export interface PreviewImage {
+  src: string;
+  alt?: string;
+  title?: string;
 }
 
 export const kInlineCodeStyle = "inline-code-style";
@@ -298,7 +315,7 @@ export function readRenderedContents(
   const navEls = doc.querySelectorAll("nav");
   if (navEls) {
     for (const navEl of navEls) {
-      navEl.remove();
+      (navEl as Element).remove();
     }
   }
 
@@ -327,7 +344,7 @@ export function readRenderedContents(
   stripSelectors.forEach((sel) => {
     const nodes = doc.querySelectorAll(sel);
     nodes?.forEach((node) => {
-      node.remove();
+      (node as Element).remove();
     });
   });
 
@@ -362,8 +379,9 @@ export function readRenderedContents(
     const linkNodes = doc.querySelectorAll(relativeLinkSel);
     linkNodes.forEach((linkNode) => {
       const nodesToMove = linkNode.childNodes;
-      linkNode.after(...nodesToMove);
-      linkNode.remove();
+      const linkEl = linkNode as Element;
+      linkEl.after(...nodesToMove);
+      linkEl.remove();
     });
   }
 
@@ -422,8 +440,9 @@ export function readRenderedContents(
     const linkNodes = doc.querySelectorAll(relativeLinkSel);
     linkNodes.forEach((linkNode) => {
       const nodesToMove = linkNode.childNodes;
-      linkNode.after(...nodesToMove);
-      linkNode.remove();
+      const linkEl = linkNode as Element;
+      linkEl.after(...nodesToMove);
+      linkEl.remove();
     });
   }
 
@@ -498,6 +517,27 @@ export function readRenderedContents(
     return undefined;
   };
 
+  // Find a preview image, if present
+  const computePreviewImage = (): PreviewImage | undefined => {
+    const previewImageEl = findPreviewImgEl(doc);
+    if (previewImageEl) {
+      const previewImageSrc = getDecodedAttribute(previewImageEl, "src");
+      if (previewImageSrc !== null) {
+        const src = previewImageSrc;
+        const alt = previewImageEl.getAttribute("alt") !== null
+          ? previewImageEl.getAttribute("alt") as string
+          : undefined;
+        const title = previewImageEl.getAttribute("title") !== null
+          ? previewImageEl.getAttribute("title") as string
+          : undefined;
+        return {
+          src,
+          alt,
+          title,
+        };
+      }
+    }
+  };
   // Clean and fetch data
   const firstPara = getFirstPara();
   const fullContents = cleanMath(mainEl?.innerHTML);
@@ -506,6 +546,7 @@ export function readRenderedContents(
     title: titleText,
     fullContents,
     firstPara,
+    previewImage: computePreviewImage(),
   };
 }
 
@@ -516,3 +557,31 @@ const kWebTexUrl = (
   const encodedMath = encodeURI(math);
   return `https://latex.codecogs.com/${type}.latex?${encodedMath}`;
 };
+
+export function defaultSyntaxHighlightingClassMap() {
+  const classToStyleMapping: Record<string, string[]> = {};
+
+  // Read the highlight style (theme name)
+  const theme = kDefaultHighlightStyle;
+  const themeRaw = readTheme("", theme, "default");
+  if (themeRaw) {
+    const themeJson = JSON.parse(themeRaw);
+
+    // Generates CSS rules based upon the syntax highlighting rules in a theme file
+    const textStyles = themeJson["text-styles"] as Record<
+      string,
+      Record<string, unknown>
+    >;
+    if (textStyles) {
+      Object.keys(textStyles).forEach((styleName) => {
+        const abbr = kAbbrevs[styleName];
+        if (abbr !== undefined) {
+          const textValues = textStyles[styleName];
+          const cssValues = generateCssKeyValues(textValues);
+          classToStyleMapping[abbr] = cssValues;
+        }
+      });
+    }
+  }
+  return classToStyleMapping;
+}

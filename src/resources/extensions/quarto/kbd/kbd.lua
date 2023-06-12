@@ -2,9 +2,9 @@
 return {
   ['kbd'] = function(args, kwargs, meta)
     local function osname(v)
-      if v == "win" then return "Windows" end
-      if v == "mac" then return "Mac" end
-      if v == "linux" then return "Linux" end       
+      if v == "win" then return "windows" end
+      if v == "mac" then return "mac" end
+      if v == "linux" then return "linux" end       
     end
     if quarto.doc.is_format("html:js") then
       quarto.doc.add_html_dependency({
@@ -31,6 +31,10 @@ return {
       end
 
       return pandoc.RawInline('html', '<kbd ' .. kwargs_str .. '>' .. default_arg_str .. '</kbd>')
+    elseif quarto.doc.isFormat("asciidoc") and args and #args == 1 then
+      -- get the 'first' kbd shortcut as we can only produce on shortcut in asciidoc
+      local shortcutText = pandoc.utils.stringify(args[1][1]):gsub('-', '+')
+      return pandoc.RawInline("asciidoc", "kbd:[" .. shortcutText .. "]")
     else
       -- example shortcodes
       -- {{< kbd Shift-Ctrl-P >}}

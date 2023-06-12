@@ -1,9 +1,8 @@
 /*
-* extension.ts
-*
-* Copyright (C) 2020-2022 Posit Software, PBC
-*
-*/
+ * extension.ts
+ *
+ * Copyright (C) 2020-2022 Posit Software, PBC
+ */
 
 import { existsSync, walkSync } from "fs/mod.ts";
 import { expandGlobSync } from "../core/deno/expand-glob.ts";
@@ -19,19 +18,13 @@ import { isSubdir } from "fs/_util.ts";
 
 import { dirname, isAbsolute, join, normalize, relative } from "path/mod.ts";
 import { Metadata, QuartoFilter } from "../config/types.ts";
-import { kSkipHidden, resolvePathGlobs } from "../core/path.ts";
+import { kSkipHidden, normalizePath, resolvePathGlobs } from "../core/path.ts";
 import { toInputRelativePaths } from "../project/project-shared.ts";
 import { projectType } from "../project/types/project-types.ts";
 import { mergeConfigs } from "../core/config.ts";
 import { quartoConfig } from "../core/quarto.ts";
 
 import {
-  Contributes,
-  Extension,
-  ExtensionContext,
-  ExtensionId,
-  extensionIdString,
-  ExtensionOptions,
   kAuthor,
   kBuiltInExtOrg,
   kCommon,
@@ -40,19 +33,28 @@ import {
   kRevealJSPlugins,
   kTitle,
   kVersion,
+} from "./constants.ts";
+import { extensionIdString } from "./extension-shared.ts";
+import {
+  Contributes,
+  Extension,
+  ExtensionContext,
+  ExtensionId,
+  ExtensionOptions,
   RevealPluginInline,
-} from "./extension-shared.ts";
+} from "./types.ts";
+
 import { cloneDeep } from "../core/lodash.ts";
 import { readAndValidateYamlFromFile } from "../core/schema/validated-yaml.ts";
 import { getExtensionConfigSchema } from "../core/lib/yaml-schema/project-config.ts";
-import { projectIgnoreGlobs } from "../project/project-context.ts";
+import { projectIgnoreGlobs } from "../project/project-shared.ts";
 import { ProjectType } from "../project/types/types.ts";
 import { copyResourceFile } from "../project/project-resources.ts";
 import {
   RevealPlugin,
   RevealPluginBundle,
   RevealPluginScript,
-} from "../format/reveal/format-reveal-plugin.ts";
+} from "../format/reveal/format-reveal-plugin-types.ts";
 import { resourcePath } from "../core/resources.ts";
 import { warnOnce } from "../core/log.ts";
 
@@ -486,7 +488,7 @@ export function inputExtensionDirs(input?: string, projectDir?: string) {
   // read extensions (start with built-in)
   const extensionDirectories: string[] = [builtinExtensions()];
   if (projectDir && input) {
-    let currentDir = Deno.realPathSync(inputDirName(input));
+    let currentDir = normalizePath(inputDirName(input));
     do {
       const extensionPath = extensionsDirPath(currentDir);
       if (extensionPath) {
@@ -554,7 +556,7 @@ export function discoverExtensionPath(
 
   // Start in the source directory
   const sourceDir = Deno.statSync(input).isDirectory ? input : dirname(input);
-  const sourceDirAbs = Deno.realPathSync(sourceDir);
+  const sourceDirAbs = normalizePath(sourceDir);
 
   if (projectDir && isSubdir(projectDir, sourceDirAbs)) {
     let extensionDir;

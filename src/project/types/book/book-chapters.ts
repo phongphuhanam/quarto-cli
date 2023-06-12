@@ -6,6 +6,7 @@ import {
   kCrossref,
   kCrossrefAppendixDelim,
   kCrossrefAppendixTitle,
+  kCrossrefApxPrefix,
   kCrossrefChapterId,
   kCrossrefChaptersAlpha,
   kCrossrefChaptersAppendix,
@@ -21,7 +22,8 @@ import { Metadata } from "../../../config/types.ts";
 
 import { ProjectConfig, ProjectContext } from "../../types.ts";
 
-import { bookConfigRenderItems, kBookItemAppendix } from "./book-config.ts";
+import { bookConfigRenderItems } from "./book-config.ts";
+import { kBookItemAppendix } from "./book-constants.ts";
 import { bookConfig } from "./book-shared.ts";
 
 export function withChapterMetadata(
@@ -134,7 +136,8 @@ export function formatChapterTitle(
   if (info) {
     if (info.appendix) {
       const crossref = format.metadata?.crossref as Metadata;
-      const title = crossref?.[kCrossrefAppendixTitle] || "Appendix";
+      const title = crossref?.[kCrossrefAppendixTitle] ||
+        format.language[kCrossrefApxPrefix] || "Appendix";
       const delim = crossref?.[kCrossrefAppendixDelim] !== undefined
         ? crossref?.[kCrossrefAppendixDelim]
         : " —";

@@ -2,11 +2,10 @@
  * types.ts
  *
  * Copyright (C) 2020 by RStudio, PBC
- *
  */
 
 import { RenderFlags } from "../../../command/render/types.ts";
-import { PublishFiles } from "../../provider.ts";
+import { PublishFiles } from "../../provider-types.ts";
 
 export enum LogLevel {
   DEBUG = "DEBUG",
@@ -28,6 +27,11 @@ export type User = {
   accountId: string;
   accountType: "atlassian" | "app";
   email: string;
+  operations: Operation[];
+};
+
+export type Operation = {
+  operation: string;
 };
 
 export type Space = {
@@ -137,6 +141,9 @@ export type Content = {
 
 export interface WrappedResult<T> {
   results: T[];
+  start?: number;
+  limit?: number;
+  size?: number;
 }
 
 export enum ContentPropertyKey {
@@ -185,12 +192,12 @@ export type SiteFileMetadata = {
   fileName: string;
   title: string;
   originalTitle: string;
-  matchingPages: ContentSummary[];
   contentBody: ContentBody;
 };
 
 export type ContentSummary = {
   id: string | null;
+  ancestors?: ContentAncestor[] | null;
   title: string | null;
 };
 
@@ -198,6 +205,7 @@ export type SitePage = {
   id: string;
   metadata: Record<string, any>;
   title: string | null;
+  ancestors?: ContentAncestor[] | null;
 };
 
 export type ExtractedLink = {

@@ -43,7 +43,7 @@ end
 
 function preprocessRawTableBlock(rawEl, parentId)
   
-  function divWrap(el, label, caption)
+  local function divWrap(el, label, caption)
     local div = pandoc.Div(el, pandoc.Attr(label))
     if parentId then
       div.attr.attributes[kRefParent] = parentId
@@ -273,7 +273,7 @@ function prependTitlePrefix(caption, label, order)
      tprepend(caption.content, {
        pandoc.RawInline('latex', '\\label{' .. label .. '}')
      })
-  else
+  elseif not _quarto.format.isAsciiDocOutput() then
      tprepend(caption.content, tableTitlePrefix(order))
   end
 end

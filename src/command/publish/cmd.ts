@@ -1,9 +1,8 @@
 /*
-* cmd.ts
-*
-* Copyright (C) 2020-2022 Posit Software, PBC
-*
-*/
+ * cmd.ts
+ *
+ * Copyright (C) 2020-2022 Posit Software, PBC
+ */
 
 import { existsSync } from "fs/mod.ts";
 
@@ -11,13 +10,11 @@ import { Command } from "cliffy/command/mod.ts";
 import { Select } from "cliffy/prompt/select.ts";
 import { prompt } from "cliffy/prompt/mod.ts";
 
-import {
-  AccountToken,
-  findProvider,
-  PublishProvider,
-  publishProviders,
-} from "../../publish/provider.ts";
+import { findProvider } from "../../publish/provider.ts";
 
+import { AccountToken, PublishProvider } from "../../publish/provider-types.ts";
+
+import { publishProviders } from "../../publish/provider.ts";
 import { initYamlIntelligenceResourcesFromFilesystem } from "../../core/schema/utils.ts";
 import {
   initState,
@@ -26,8 +23,9 @@ import {
 import {
   projectContext,
   projectInputFiles,
-  projectIsWebsite,
 } from "../../project/project-context.ts";
+
+import { projectIsWebsite } from "../../project/project-shared.ts";
 
 import { PublishCommandOptions } from "./options.ts";
 import { resolveDeployment } from "./deployment.ts";
@@ -53,8 +51,9 @@ export const publishCommand =
       "Publish a document or project. Available providers include:\n\n" +
         " - Quarto Pub (quarto-pub)\n" +
         " - GitHub Pages (gh-pages)\n" +
-        " - RStudio Connect (connect)\n" +
-        " - Netlify (netlify)\n\n" +
+        " - Posit Connect (connect)\n" +
+        " - Netlify (netlify)\n" +
+        " - Confluence (confluence)\n\n" +
         "Accounts are configured interactively during publishing.\n" +
         "Manage/remove accounts with: quarto publish accounts",
     )
@@ -104,7 +103,7 @@ export const publishCommand =
       "quarto publish gh-pages",
     )
     .example(
-      "Publish project to RStudio Connect",
+      "Publish project to Posit Connect",
       "quarto publish connect",
     )
     .example(
@@ -225,7 +224,7 @@ async function publishAction(
     );
   } else if (publishOptions.prompt) {
     // new deployment, determine provider if needed
-    const providers = await publishProviders();
+    const providers = publishProviders();
     if (!provider) {
       if (haveArrowKeys()) {
         // select provider
@@ -233,10 +232,12 @@ async function publishAction(
           indent: "",
           name: "provider",
           message: "Provider:",
-          options: providers.map((provider) => ({
-            name: provider.description,
-            value: provider.name,
-          })),
+          options: providers
+            .filter((provider) => !provider.hidden)
+            .map((provider) => ({
+              name: provider.description,
+              value: provider.name,
+            })),
           type: Select,
         }]);
         if (result.provider) {

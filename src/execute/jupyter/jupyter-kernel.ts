@@ -1,9 +1,8 @@
 /*
-* jupyter-kernel.ts
-*
-* Copyright (C) 2020-2022 Posit Software, PBC
-*
-*/
+ * jupyter-kernel.ts
+ *
+ * Copyright (C) 2020-2022 Posit Software, PBC
+ */
 
 import { existsSync } from "fs/mod.ts";
 import { join } from "path/mod.ts";
@@ -11,7 +10,8 @@ import { error, info, warning } from "log/mod.ts";
 
 import { sleep } from "../../core/async.ts";
 import { quartoDataDir, quartoRuntimeDir } from "../../core/appdirs.ts";
-import { execProcess, ProcessResult } from "../../core/process.ts";
+import { execProcess } from "../../core/process.ts";
+import { ProcessResult } from "../../core/process-types.ts";
 import { md5Hash } from "../../core/hash.ts";
 import { resourcePath } from "../../core/resources.ts";
 import { pythonExec } from "../../core/jupyter/exec.ts";
@@ -34,6 +34,7 @@ import {
 } from "../../config/constants.ts";
 
 import { ExecuteOptions } from "../types.ts";
+import { normalizePath } from "../../core/path.ts";
 
 export interface JupyterExecuteOptions extends ExecuteOptions {
   kernelspec: JupyterKernelspec;
@@ -293,7 +294,7 @@ interface KernelTransport {
 
 function kernelTransportFile(target: string) {
   const transportsDir = quartoRuntimeDir("jt");
-  const targetFile = Deno.realPathSync(target);
+  const targetFile = normalizePath(target);
   const hash = md5Hash(targetFile).slice(0, 20);
   return join(transportsDir, hash);
 }

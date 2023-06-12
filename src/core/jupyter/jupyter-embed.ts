@@ -9,7 +9,6 @@ import { resourcePath } from "../resources.ts";
 import { getNamedLifetime, ObjectWithLifetime } from "../lifetimes.ts";
 
 import {
-  cleanEmptyJupyterAssets,
   jupyterAssets,
   jupyterFromFile,
   jupyterToMarkdown,
@@ -45,7 +44,7 @@ import {
 import { globalTempContext } from "../temp.ts";
 import { isAbsolute } from "path/mod.ts";
 import { partitionMarkdown } from "../pandoc/pandoc-partition.ts";
-import { removeIfEmptyDir, safeExistsSync } from "../path.ts";
+import { normalizePath, safeExistsSync } from "../path.ts";
 import { basename } from "path/mod.ts";
 
 export interface JupyterNotebookAddress {
@@ -74,7 +73,7 @@ const kOutput = "output";
 
 const kHashRegex = /(.*?)#(.*)/;
 const kIndexRegex = /(.*)\[([0-9,-]*)\]/;
-const kPlaceholderRegex = /<!-- 12A0366C:(.*?) \| (.*?) \| (.*?) -->/;
+const kPlaceholderRegex = /<!-- 12A0366C\|(.*)\|:(.*?) \| (.*?) \| (.*?) -->/;
 
 const kNotebookCache = "notebook-cache";
 const kRenderFileLifeTime = "render-file";
@@ -98,7 +97,7 @@ export function parseNotebookAddress(
         ids: resolveCellIds(hashResult[2]),
       };
     } else {
-      return undefined;
+      unsupportedEmbed(path);
     }
   }
 
@@ -112,7 +111,7 @@ export function parseNotebookAddress(
         indexes: resolveRange(indexResult[2]),
       };
     } else {
-      return undefined;
+      unsupportedEmbed(path);
     }
   }
 
@@ -122,8 +121,14 @@ export function parseNotebookAddress(
       path,
     };
   } else {
-    return undefined;
+    unsupportedEmbed(path);
   }
+}
+
+function unsupportedEmbed(path: string) {
+  throw new Error(
+    `Unable to embed content from ${path}. Embedding currently only supports content from Juptyer Notebooks.`,
+  );
 }
 
 // Creates a placeholder that will later be replaced with
@@ -131,11 +136,12 @@ export function parseNotebookAddress(
 // must stipulate all the information required to generate the
 // markdown (e.g. options, output indexes and so on)
 export function notebookMarkdownPlaceholder(
-  path: string,
+  input: string,
+  nbPath: string,
   options: JupyterMarkdownOptions,
   outputs?: string,
 ) {
-  return `<!-- 12A0366C:${path} | ${outputs || ""} | ${
+  return `<!-- 12A0366C|${input}|:${nbPath} | ${outputs || ""} | ${
     optionsToPlaceholder(options)
   } -->`;
 }
@@ -149,28 +155,32 @@ export async function replaceNotebookPlaceholders(
   flags: RenderFlags,
   markdown: string,
 ) {
+  const assetCache: Record<string, JupyterAssets> = {};
   let match = kPlaceholderRegex.exec(markdown);
-  let assets;
   let includes;
   while (match) {
-    if (!assets) {
-      assets = jupyterAssets(
-        context.target.source,
-        to,
-      );
-    }
-
     // Parse the address and if this is a notebook
     // then proceed with the replacement
-    const nbAddressStr = match[1];
+    const inputPath = match[1];
+    const nbAddressStr = match[2];
+
+    let assets = assetCache[inputPath];
+    if (!assets) {
+      assets = jupyterAssets(
+        inputPath,
+        to,
+      );
+      assetCache[inputPath] = assets;
+    }
+
     const nbAddress = parseNotebookAddress(nbAddressStr);
     if (nbAddress) {
       // If a list of outputs are provided, resolve that range
-      const outputsStr = match[2];
+      const outputsStr = match[3];
       const nbOutputs = outputsStr ? resolveRange(outputsStr) : undefined;
 
       // If cell options are provided, resolve those
-      const placeholderStr = match[3];
+      const placeholderStr = match[4];
       const nbOptions = placeholderStr
         ? placeholderToOptions(placeholderStr)
         : {};
@@ -178,7 +188,7 @@ export async function replaceNotebookPlaceholders(
       // Compute appropriate includes based upon the note
       // dependendencies
       const notebookIncludes = () => {
-        const nbPath = resolveNbPath(input, nbAddress.path);
+        const nbPath = resolveNbPath(inputPath, nbAddress.path);
         if (safeExistsSync(nbPath)) {
           const notebook = jupyterFromFile(nbPath);
           const dependencies = isHtmlOutput(context.format.pandoc)
@@ -204,6 +214,7 @@ export async function replaceNotebookPlaceholders(
 
       // Render the notebook markdown
       const nbMarkdown = await notebookMarkdown(
+        inputPath,
         nbAddress,
         assets,
         context,
@@ -218,9 +229,11 @@ export async function replaceNotebookPlaceholders(
     match = kPlaceholderRegex.exec(markdown);
   }
   kPlaceholderRegex.lastIndex = 0;
-  const supporting = assets
-    ? join(assets.base_dir, assets.supporting_dir)
-    : undefined;
+
+  const supporting = Object.values(assetCache).map((assets) => {
+    return join(assets.base_dir, assets.supporting_dir);
+  });
+
   return {
     includes,
     markdown,
@@ -238,6 +251,7 @@ function resolveNbPath(input: string, path: string) {
 
 // Gets the markdown for a specific notebook and set of options
 async function notebookMarkdown(
+  inputPath: string,
   nbAddress: JupyterNotebookAddress,
   assets: JupyterAssets,
   context: RenderContext,
@@ -247,6 +261,7 @@ async function notebookMarkdown(
 ) {
   // Get the cell outputs for this notebook
   const notebookInfo = await getCachedNotebookInfo(
+    inputPath,
     nbAddress,
     assets,
     context,
@@ -264,7 +279,7 @@ async function notebookMarkdown(
   ) => {
     const markdown = [
       "",
-      `:::{notebook="${nbAddress.path}" ${
+      `:::{.quarto-embed-nb-cell notebook="${nbAddress.path}" ${
         title ? `notebook-title="${title}"` : ""
       }}`,
     ];
@@ -337,6 +352,7 @@ async function notebookMarkdown(
 // the cache will include options that control markdown output
 // when determining whether it can use cached contents.
 async function getCachedNotebookInfo(
+  inputPath: string,
   nbAddress: JupyterNotebookAddress,
   assets: JupyterAssets,
   context: RenderContext,
@@ -359,12 +375,12 @@ async function getCachedNotebookInfo(
     };
 
   // Compute a cache key
-  const cacheKey = notebookCacheKey(nbAddress, options, outputs);
+  const cacheKey = notebookCacheKey(inputPath, nbAddress, options, outputs);
   if (!nbCache.cache[cacheKey]) {
     // Render the notebook and place it in the cache
     // Read and filter notebook
     const notebook = jupyterFromFile(
-      resolveNbPath(context.target.input, nbAddress.path),
+      resolveNbPath(inputPath, nbAddress.path),
     );
     if (options) {
       notebook.cells = notebook.cells.map((cell) => {
@@ -411,7 +427,7 @@ async function getCachedNotebookInfo(
       format: context.format,
       projectDir: context.project?.dir,
       cwd: flags.executeDir ||
-        dirname(Deno.realPathSync(context.target.source)),
+        dirname(normalizePath(context.target.source)),
       params: resolveParams(flags.params, flags.paramsFile),
       quiet: flags.quiet,
       previewServer: context.options.previewServer,
@@ -427,7 +443,7 @@ async function getCachedNotebookInfo(
         keepHidden: format.render[kKeepHidden],
         toHtml: isHtmlCompatible(format),
         toLatex: isLatexOutput(format.pandoc),
-        toMarkdown: isMarkdownOutput(format.pandoc),
+        toMarkdown: isMarkdownOutput(format),
         toIpynb: isIpynbOutput(format.pandoc),
         toPresentation: isPresentationOutput(format.pandoc),
         figFormat: format.execute[kFigFormat],
@@ -463,6 +479,7 @@ function findTitle(cells: JupyterCellOutput[]) {
 // that incorporates options that affect markdown
 // output
 function notebookCacheKey(
+  inputPath: string,
   nbAddress: JupyterNotebookAddress,
   nbOptions?: JupyterMarkdownOptions,
   nbOutputs?: number[],
@@ -478,8 +495,8 @@ function notebookCacheKey(
     : "";
 
   const coreKey = optionsKey
-    ? `${nbAddress.path}-${optionsKey}`
-    : nbAddress.path;
+    ? `${inputPath}-${nbAddress.path}-${optionsKey}`
+    : `${inputPath}-${nbAddress.path}`;
 
   const outputsKey = nbOutputs ? nbOutputs.join(",") : "";
   return `${coreKey}:${outputsKey}`;

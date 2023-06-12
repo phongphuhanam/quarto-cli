@@ -3,11 +3,33 @@
 
 -- constants for list attributes
 kLstCap = "lst-cap"
+-- local kDataCodeAnnonationClz = 'code-annotation-code'
 
 -- process all listings
 function listings()
   
   return {
+    DecoratedCodeBlock = function(node)
+      local el = node.code_block
+      local label = string.match(el.attr.identifier, "^lst%-[^ ]+$")
+      local caption = el.attr.attributes[kLstCap]
+      if label and caption then
+        -- the listing number
+        local order = indexNextOrder("lst")
+        
+        -- generate content from markdown caption
+        local captionContent = markdownToInlines(caption)
+
+        -- add the listing to the index
+        indexAddEntry(label, nil, order, captionContent)
+
+        node.caption = captionContent
+        node.order = order
+        return node
+      end
+      return nil
+    end,
+
     CodeBlock = function(el)
       local label = string.match(el.attr.identifier, "^lst%-[^ ]+$")
       local caption = el.attr.attributes[kLstCap]
@@ -31,7 +53,11 @@ function listings()
           -- further, otherwise generate the listing div and return it
           if not latexListings() then
             local listingDiv = pandoc.Div({})
-            listingDiv.content:insert(pandoc.RawBlock("latex", "\\begin{codelisting}"))
+            local env = "\\begin{codelisting}"
+            if el.classes:includes('code-annotation-code') then
+              env = env .. "[H]"
+            end
+            listingDiv.content:insert(pandoc.RawBlock("latex", env))
             local listingCaption = pandoc.Plain({pandoc.RawInline("latex", "\\caption{")})
             listingCaption.content:extend(captionContent)
             listingCaption.content:insert(pandoc.RawInline("latex", "}"))

@@ -56,6 +56,7 @@ import { bookProjectConfig } from "./book-config.ts";
 import { chapterInfoForInput, numberChapterHtmlNav } from "./book-chapters.ts";
 import {
   bookConfig,
+  BookExtension,
   isMultiFileBookFormat,
   kBook,
   setBookConfig,
@@ -113,6 +114,35 @@ export const bookProjectType: ProjectType = {
   libDir: "site_libs",
   outputDir: "_book",
   cleanOutputDir: true,
+  filterFormat: (source: string, format: Format, project?: ProjectContext) => {
+    if (format.extensions?.book) {
+      const bookExt = format.extensions?.book as BookExtension;
+      if (bookExt.filterFormat) {
+        return bookExt.filterFormat(source, format, project);
+      } else {
+        return format;
+      }
+    } else {
+      return format;
+    }
+  },
+  formatOutputDirectory: (format: Format) => {
+    if (format.extensions?.book) {
+      const bookExt = format.extensions?.book as BookExtension;
+      if (bookExt.formatOutputDirectory) {
+        return bookExt.formatOutputDirectory();
+      } else {
+        return undefined;
+      }
+    } else {
+      return undefined;
+    }
+  },
+
+  selfContainedOutput: (format: Format) => {
+    const bookExtension = format.extensions?.book as BookExtension | undefined;
+    return bookExtension?.selfContainedOutput || false;
+  },
 
   config: bookProjectConfig,
 
@@ -123,12 +153,18 @@ export const bookProjectType: ProjectType = {
   },
 
   filterParams: (options: PandocOptions) => {
+    const bookExt = options.format.extensions?.book as BookExtension;
+    const filterParams = bookExt.filterParams
+      ? bookExt.filterParams(options)
+      : {};
     if (isMultiFileBookFormat(options.format)) {
       return {
+        ...filterParams,
         [kCrossrefResolveRefs]: false,
       };
     } else {
       return {
+        ...filterParams,
         [kSingleFileBook]: true,
       };
     }
@@ -250,8 +286,8 @@ function bookHtmlPostprocessor() {
     // if the very next element is a section, move it into the section below the header
     const nextEl = (coverImage?.parentNode as Element)?.nextElementSibling;
     if (nextEl && nextEl.tagName === "SECTION" && coverImage?.parentNode) {
-      coverImage?.parentNode.remove();
-      nextEl.firstChild.after(coverImage?.parentNode);
+      coverImage?.parentElement?.remove();
+      nextEl.firstElementChild?.after(coverImage?.parentNode);
     }
     return Promise.resolve(kHtmlEmptyPostProcessResult);
   };

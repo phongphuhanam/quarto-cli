@@ -1,21 +1,22 @@
 /*
-* format-html-bootstrap.ts
-*
-* Copyright (C) 2020-2022 Posit Software, PBC
-*
-*/
+ * format-html-bootstrap.ts
+ *
+ * Copyright (C) 2020-2022 Posit Software, PBC
+ */
 
 import { Document, Element } from "../../core/deno-dom.ts";
-import { join } from "path/mod.ts";
+import { dirname, isAbsolute, join, relative } from "path/mod.ts";
 
 import { renderEjs } from "../../core/ejs.ts";
 import { formatResourcePath } from "../../core/resources.ts";
 import { findParent } from "../../core/html.ts";
 
 import {
+  kContentMode,
   kDisplayName,
   kExtensionName,
   kFormatLinks,
+  kGrid,
   kHtmlMathMethod,
   kIncludeInHeader,
   kLinkCitations,
@@ -25,6 +26,7 @@ import {
   kSectionDivs,
   kTargetFormat,
   kTocDepth,
+  kTocExpand,
   kTocLocation,
 } from "../../config/constants.ts";
 import {
@@ -43,15 +45,16 @@ import { hasTableOfContents } from "../../config/toc.ts";
 
 import { resolveBootstrapScss } from "./format-html-scss.ts";
 import {
+  formatHasArticleLayout,
+  formatHasFullLayout,
+  formatPageLayout,
   hasMarginCites,
   hasMarginRefs,
   kAppendixStyle,
   kBootstrapDependencyName,
   kDocumentCss,
   kPageLayout,
-  kPageLayoutArticle,
   kPageLayoutCustom,
-  kPageLayoutFull,
   setMainColumn,
 } from "./format-html-shared.ts";
 import {
@@ -70,7 +73,6 @@ import {
   processDocumentTitle,
 } from "./format-html-title.ts";
 import { kTemplatePartials } from "../../command/render/template.ts";
-import { TempContext } from "../../core/temp-types.ts";
 import {
   isDocxOutput,
   isHtmlOutput,
@@ -81,22 +83,7 @@ import {
 } from "../../config/format.ts";
 import { basename } from "path/mod.ts";
 import { processNotebookEmbeds } from "./format-html-notebook.ts";
-import { projectContext } from "../../project/project-context.ts";
 import { ProjectContext } from "../../project/types.ts";
-
-export function formatPageLayout(format: Format) {
-  return format.metadata[kPageLayout] as string || kPageLayoutArticle;
-}
-
-export function formatHasFullLayout(format: Format) {
-  return format.metadata[kPageLayout] === kPageLayoutFull;
-}
-
-export function formatHasArticleLayout(format: Format) {
-  return format.metadata[kPageLayout] === undefined ||
-    format.metadata[kPageLayout] === kPageLayoutArticle ||
-    format.metadata[kPageLayout] === kPageLayoutFull;
-}
 
 export function bootstrapFormatDependency() {
   const boostrapResource = (resource: string) =>
@@ -275,7 +262,7 @@ function bootstrapHtmlPostprocessor(
     // add figure classes to figures
     const figures = doc.querySelectorAll("figure");
     for (let i = 0; i < figures.length; i++) {
-      const figure = (figures[i] as Element);
+      const figure = figures[i] as Element;
       figure.classList.add("figure");
       const images = figure.querySelectorAll("img");
       for (let j = 0; j < images.length; j++) {
@@ -295,6 +282,16 @@ function bootstrapHtmlPostprocessor(
       // activate selection behavior for this
       toc.classList.add("toc-active");
 
+      const expanded = format.metadata[kTocExpand];
+      if (expanded !== undefined) {
+        if (expanded === true) {
+          toc.setAttribute("data-toc-expanded", 99);
+        } else if (expanded) {
+          toc.setAttribute("data-toc-expanded", expanded);
+        } else {
+          toc.setAttribute("data-toc-expanded", -1);
+        }
+      }
       // add nav-link class to the TOC links
       const tocLinks = doc.querySelectorAll('nav[role="doc-toc"] > ul a');
       for (let i = 0; i < tocLinks.length; i++) {
@@ -335,7 +332,7 @@ function bootstrapHtmlPostprocessor(
     // Inject links to other formats if there is another
     // format that of this file that has been rendered
     if (format.render[kFormatLinks] !== false) {
-      processAlternateFormatLinks(options, doc, format, resources);
+      processAlternateFormatLinks(input, options, doc, format, resources);
     }
 
     // Look for included / embedded notebooks and include those
@@ -357,7 +354,9 @@ function bootstrapHtmlPostprocessor(
     const addTableClasses = (table: Element, computational = false) => {
       table.classList.add("table");
       if (computational) {
-        table.classList.add("table-sm").add("table-striped");
+        table.classList.add("table-sm");
+        table.classList.add("table-striped");
+        table.classList.add("small");
       }
     };
 
@@ -457,7 +456,7 @@ const fileBsIconName = (format: Format) => {
     return "file-pdf";
   } else if (isIpynbOutput(format.pandoc)) {
     return "journal-code";
-  } else if (isMarkdownOutput(format.pandoc)) {
+  } else if (isMarkdownOutput(format)) {
     return "file-code";
   } else if (isPresentationOutput(format.pandoc)) {
     return "file-slides";
@@ -467,6 +466,7 @@ const fileBsIconName = (format: Format) => {
 };
 
 function processAlternateFormatLinks(
+  input: string,
   options: {
     inputMetadata: Metadata;
     inputTraits: PandocInputTraits;
@@ -515,45 +515,54 @@ function processAlternateFormatLinks(
         })
         : options.renderedFormats;
 
-      for (const renderedFormat of displayFormats) {
-        if (!isHtmlOutput(renderedFormat.format.pandoc, true)) {
-          const li = doc.createElement("li");
+      const finalDisplayFormats = displayFormats.filter((renderedFormat) => {
+        return !isHtmlOutput(renderedFormat.format.pandoc, true);
+      });
 
-          const link = doc.createElement("a");
-          link.setAttribute("href", renderedFormat.path);
-          const dlAttrValue = fileDownloadAttr(
-            renderedFormat.format,
-            renderedFormat.path,
-          );
-          if (dlAttrValue) {
-            link.setAttribute("download", dlAttrValue);
-          }
+      for (const renderedFormat of finalDisplayFormats) {
+        const li = doc.createElement("li");
 
-          const icon = doc.createElement("i");
-          icon.classList.add("bi");
-          icon.classList.add(`bi-${fileBsIconName(renderedFormat.format)}`);
-          link.appendChild(icon);
-          link.appendChild(
-            doc.createTextNode(
-              `${
-                renderedFormat.format.identifier[kDisplayName] ||
-                renderedFormat.format.pandoc.to
-              }${
-                renderedFormat.format.identifier[kExtensionName]
-                  ? ` (${renderedFormat.format.identifier[kExtensionName]})`
-                  : ""
-              }`,
-            ),
-          );
+        const relPath = isAbsolute(renderedFormat.path)
+          ? relative(dirname(input), renderedFormat.path)
+          : renderedFormat.path;
 
-          li.appendChild(link);
-          formatList.appendChild(li);
-
-          resources.push(renderedFormat.path);
+        const link = doc.createElement("a");
+        link.setAttribute("href", relPath);
+        const dlAttrValue = fileDownloadAttr(
+          renderedFormat.format,
+          renderedFormat.path,
+        );
+        if (dlAttrValue) {
+          link.setAttribute("download", dlAttrValue);
         }
+
+        const icon = doc.createElement("i");
+        icon.classList.add("bi");
+        icon.classList.add(`bi-${fileBsIconName(renderedFormat.format)}`);
+        link.appendChild(icon);
+        link.appendChild(
+          doc.createTextNode(
+            `${
+              renderedFormat.format.identifier[kDisplayName] ||
+              renderedFormat.format.pandoc.to
+            }${
+              renderedFormat.format.identifier[kExtensionName]
+                ? ` (${renderedFormat.format.identifier[kExtensionName]})`
+                : ""
+            }`,
+          ),
+        );
+
+        li.appendChild(link);
+        formatList.appendChild(li);
+
+        resources.push(renderedFormat.path);
       }
-      containerEl.appendChild(formatList);
-      dlLinkTarget.appendChild(containerEl);
+
+      if (finalDisplayFormats.length > 0) {
+        containerEl.appendChild(formatList);
+        dlLinkTarget.appendChild(containerEl);
+      }
     }
   }
 }
@@ -610,23 +619,41 @@ function bootstrapHtmlFinalizer(format: Format, flags: PandocFlags) {
     if (rightSidebar && !hasRightContent && !hasMarginContent && !hasToc) {
       rightSidebar.remove();
     }
-    const hasColumnElements = getColumnLayoutElements(doc).length > 0;
 
-    if (hasColumnElements) {
-      if (hasLeftContent && hasMarginContent) {
-        // Slim down the content area so there are sizable margins
-        // for the column element
-        doc.body.classList.add("slimcontent");
-      } else if (hasRightContent || hasMarginContent || fullLayout || hasToc) {
-        // Use the default layout, so don't add any classes
+    // Set the content mode for the grid system
+    const gridObj = format.metadata[kGrid] as Metadata;
+    let contentMode = "auto";
+    if (gridObj) {
+      contentMode =
+        gridObj[kContentMode] as ("auto" | "standard" | "full" | "slim");
+    }
+
+    if (contentMode === undefined || contentMode === "auto") {
+      const hasColumnElements = getColumnLayoutElements(doc).length > 0;
+      if (hasColumnElements) {
+        if (hasLeftContent && hasMarginContent) {
+          // Slim down the content area so there are sizable margins
+          // for the column element
+          doc.body.classList.add("slimcontent");
+        } else if (
+          hasRightContent || hasMarginContent || fullLayout || hasToc
+        ) {
+          // Use the default layout, so don't add any classes
+        } else {
+          doc.body.classList.add("fullcontent");
+        }
       } else {
-        doc.body.classList.add("fullcontent");
+        if (!hasRightContent && !hasMarginContent && !hasToc) {
+          doc.body.classList.add("fullcontent");
+        } else {
+          // Use the deafult layout, don't add any classes
+        }
       }
     } else {
-      if (!hasRightContent && !hasMarginContent && !hasToc) {
+      if (contentMode === "slim") {
+        doc.body.classList.add("slimcontent");
+      } else if (contentMode === "full") {
         doc.body.classList.add("fullcontent");
-      } else {
-        // Use the deafult layout, don't add any classes
       }
     }
 
@@ -660,6 +687,9 @@ function processColumnElements(
 
   // Process margin elements that may appear in callouts
   processMarginElsInCallouts(doc);
+
+  // Process margin elements that may appear in tabsets
+  processMarginElsInTabsets(doc);
 
   // Group margin elements by their parents and wrap them in a container
   // Be sure to ignore containers which are already processed
@@ -856,6 +886,17 @@ const processTableMarginCaption = (
 
 // Process any captions that appear in margins
 const processMarginCaptions = (doc: Document) => {
+  // Identify elements that already appear in the margin
+  // and in this case, remove the margin-caption class
+  // since we do not want to further process the caption into the margin
+  const captionsAlreadyInMargin = doc.querySelectorAll(
+    ".column-margin .margin-caption",
+  );
+  captionsAlreadyInMargin.forEach((node) => {
+    const el = node as Element;
+    el.classList.remove("margin-caption");
+  });
+
   // Forward caption class from parents to the child fig caps
   const marginCaptions = doc.querySelectorAll(".margin-caption");
   marginCaptions.forEach((node) => {
@@ -924,6 +965,53 @@ const processMarginElsInCallouts = (doc: Document) => {
 
         calloutEl.after(marginEl);
       });
+    }
+  });
+};
+
+const processMarginElsInTabsets = (doc: Document) => {
+  // Move margin elements inside tabsets into a separate container that appears
+  // before the tabset- this will hold the margin content
+  // quarto.js will detect tab changed events and propery show and hide elements
+  // by marking them with a collapse class.
+
+  const tabSetNodes = doc.querySelectorAll("div.panel-tabset");
+  tabSetNodes.forEach((tabsetNode) => {
+    const tabSetEl = tabsetNode as Element;
+    const tabNodes = tabSetEl.querySelectorAll("div.tab-pane");
+
+    const marginEls: Element[] = [];
+    let count = 0;
+    tabNodes.forEach((tabNode) => {
+      const tabEl = tabNode as Element;
+      const tabId = tabEl.id;
+
+      const marginNodes = tabEl.querySelectorAll(
+        ".column-margin, aside, .aside",
+      );
+
+      if (tabId && marginNodes.length > 0) {
+        const marginArr = Array.from(marginNodes);
+        marginArr.forEach((marginNode) => {
+          const marginEl = marginNode as Element;
+          marginEl.classList.add("tabset-margin-content");
+          marginEl.classList.add(`${tabId}-tab-margin-content`);
+          if (count > 0) {
+            marginEl.classList.add("collapse");
+          }
+          marginEls.push(marginEl);
+        });
+      }
+      count++;
+    });
+
+    if (marginEls) {
+      const containerEl = doc.createElement("div");
+      containerEl.classList.add("tabset-margin-container");
+      marginEls.forEach((marginEl) => {
+        containerEl.appendChild(marginEl);
+      });
+      tabSetEl.before(containerEl);
     }
   });
 };

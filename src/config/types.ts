@@ -1,15 +1,15 @@
 /*
-* types.ts
-*
-* Copyright (C) 2020-2022 Posit Software, PBC
-*
-*/
+ * types.ts
+ *
+ * Copyright (C) 2020-2022 Posit Software, PBC
+ */
 import { Document } from "../core/deno-dom.ts";
 
 import {
   kAppendixAttributionBibTex,
   kAppendixAttributionCiteAs,
-  kAtxHeaders,
+  kBackToTop,
+  kBaseFormat,
   kCache,
   kCalloutCautionCaption,
   kCalloutImportantCaption,
@@ -85,6 +85,7 @@ import {
   kIncludeAfterBody,
   kIncludeBeforeBody,
   kIncludeInHeader,
+  kInlineIncludes,
   kIpynbFilters,
   kKatex,
   kKeepHidden,
@@ -144,6 +145,7 @@ import {
   kPdfEngineOpt,
   kPdfEngineOpts,
   kPreferHtml,
+  kPreserveYaml,
   kQuartoFilters,
   kReferenceLocation,
   kRelatedFormatsTitle,
@@ -151,6 +153,8 @@ import {
   kRepoActionLinksEdit,
   kRepoActionLinksIssue,
   kRepoActionLinksSource,
+  kResourcePath,
+  kSearch,
   kSearchClearButtonTitle,
   kSearchCopyLinkTitle,
   kSearchDetatchedCancelButtonTitle,
@@ -190,6 +194,11 @@ import {
   kTocDepth,
   kTocTitleDocument,
   kTocTitleWebsite,
+  kToggleDarkMode,
+  kToggleNavigation,
+  kToggleReaderMode,
+  kToggleSection,
+  kToggleSidebar,
   kTopLevelDivision,
   kVariables,
   kVariant,
@@ -197,10 +206,8 @@ import {
   kWebtex,
 } from "./constants.ts";
 
-import { TempContext } from "../core/temp-types.ts";
 import { HtmlPostProcessor, RenderServices } from "../command/render/types.ts";
-import { QuartoFilterSpec } from "../command/render/filters.ts";
-import { ExtensionContext } from "../extension/extension-shared.ts";
+import { QuartoFilterSpec } from "../command/render/types.ts";
 import { ProjectContext } from "../project/types.ts";
 
 export const kDependencies = "dependencies";
@@ -325,6 +332,7 @@ export interface FormatExtras {
 }
 
 export interface FormatIdentifier {
+  [kBaseFormat]?: string;
   [kTargetFormat]?: string;
   [kDisplayName]?: string;
   [kExtensionName]?: string;
@@ -392,6 +400,8 @@ export interface FormatRender {
   [kTblColwidths]?: "auto" | boolean | number[];
   [kShortcodes]?: string[];
   [kMergeIncludes]?: boolean;
+  [kInlineIncludes]?: boolean;
+  [kPreserveYaml]?: boolean;
   [kLatexAutoMk]?: boolean;
   [kLatexAutoInstall]?: boolean;
   [kLatexMinRuns]?: number;
@@ -454,11 +464,11 @@ export interface FormatPandoc {
   [kSelfContained]?: boolean;
   [kEmbedResources]?: boolean;
   [kVariables]?: { [key: string]: unknown };
-  [kAtxHeaders]?: boolean;
   [kMarkdownHeadings]?: boolean;
   [kIncludeBeforeBody]?: string[];
   [kIncludeAfterBody]?: string[];
   [kIncludeInHeader]?: string[];
+  [kResourcePath]?: string[];
   [kReferenceLocation]?: string;
   [kCiteproc]?: boolean;
   [kCiteMethod]?: string;
@@ -561,14 +571,20 @@ export interface FormatLanguage {
   [kRepoActionLinksEdit]?: string;
   [kRepoActionLinksSource]?: string;
   [kRepoActionLinksIssue]?: string;
+  [kSearch]?: string;
   [kSearchNoResultsText]?: string;
   [kCopyButtonTooltip]?: string;
   [kCopyButtonTooltipSuccess]?: string;
+  [kBackToTop]?: string;
+  [kToggleDarkMode]?: string;
+  [kToggleNavigation]?: string;
+  [kToggleReaderMode]?: string;
+  [kToggleSection]?: string;
+  [kToggleSidebar]?: string;
   [kSearchMatchingDocumentsText]?: string;
   [kSearchCopyLinkTitle]?: string;
-  [kSearchHideMatchesText]?: string; // FIXME duplicate?
   [kSearchMoreMatchText]?: string;
-  [kSearchHideMatchesText]?: string; // FIXME duplicate?
+  [kSearchHideMatchesText]?: string;
   [kSearchClearButtonTitle]?: string;
   [kSearchDetatchedCancelButtonTitle]?: string;
   [kSearchSubmitButtonTitle]?: string;

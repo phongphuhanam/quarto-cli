@@ -1,9 +1,8 @@
 /*
-* render-shared.ts
-*
-* Copyright (C) 2020-2022 Posit Software, PBC
-*
-*/
+ * render-shared.ts
+ *
+ * Copyright (C) 2020-2022 Posit Software, PBC
+ */
 
 import { dirname } from "path/mod.ts";
 
@@ -46,6 +45,7 @@ import { execProcess } from "../../core/process.ts";
 import { createExtensionContext } from "../../extension/extension.ts";
 import { createTempContext } from "../../core/temp.ts";
 import { createNamedLifetime, getNamedLifetime } from "../../core/lifetimes.ts";
+import { normalizePath } from "../../core/path.ts";
 
 export async function render(
   path: string,
@@ -68,8 +68,8 @@ export async function render(
     // a files list that is only those files in the subdirectory
     let files: string[] | undefined;
     if (context) {
-      const renderDir = Deno.realPathSync(path);
-      const projectDir = Deno.realPathSync(context.dir);
+      const renderDir = normalizePath(path);
+      const projectDir = normalizePath(context.dir);
       if (renderDir !== projectDir) {
         files = context.files.input.filter((file) =>
           file.startsWith(renderDir)
@@ -127,32 +127,6 @@ export async function render(
     })),
     error: result.error,
   };
-}
-
-export function renderServices() {
-  const temp = createTempContext();
-  const extension = createExtensionContext();
-
-  if (getNamedLifetime("render-services")) {
-    return {
-      temp,
-      extension,
-      lifetime: getNamedLifetime("render-services"),
-      cleanup: () => {},
-    };
-  } else {
-    const lifetime = createNamedLifetime("render-services");
-    lifetime.attach(temp);
-
-    return {
-      temp,
-      extension,
-      lifetime,
-      cleanup: () => {
-        lifetime.cleanup();
-      },
-    };
-  }
 }
 
 export function printWatchingForChangesMessage() {
@@ -233,8 +207,6 @@ async function rswPortToken(port: number) {
     );
   }
 }
-
-export const kQuartoRenderCommand = "90B3C9E8-0DBC-4BC0-B164-AA2D5C031B28";
 
 export function previewUnableToRenderResponse() {
   return new Response("not found", {

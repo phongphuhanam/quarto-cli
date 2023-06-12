@@ -2,18 +2,19 @@
  * index.ts
  *
  * Copyright (C) 2020 by RStudio, PBC
- *
  */
 
 import { encode as base64encode } from "encoding/base64.ts";
 import { ensureTrailingSlash } from "../../../core/path.ts";
 
-import { AccountToken } from "../../provider.ts";
+import { AccountToken } from "../../provider-types.ts";
 import { ApiError } from "../../types.ts";
 import {
   AttachmentSummary,
+  ConfluenceParent,
   Content,
   ContentArray,
+  ContentChangeType,
   ContentCreate,
   ContentDelete,
   ContentProperty,
@@ -25,14 +26,15 @@ import {
   WrappedResult,
 } from "./types.ts";
 
-import { DESCENDANT_LIMIT } from "../constants.ts";
+import { DESCENDANT_PAGE_SIZE, V2EDITOR_METADATA } from "../constants.ts";
 import { logError, trace } from "../confluence-logger.ts";
+import { buildContentCreate } from "../confluence-helper.ts";
 
 export class ConfluenceClient {
   public constructor(private readonly token_: AccountToken) {}
 
-  public getUser(): Promise<User> {
-    return this.get<User>("user/current");
+  public getUser(expand = ["operations"]): Promise<User> {
+    return this.get<User>(`user/current?expand=${expand}`);
   }
 
   public getSpace(spaceId: string, expand = ["homepage"]): Promise<Space> {
@@ -51,48 +53,158 @@ export class ConfluenceClient {
     return result.results;
   }
 
-  public getDescendants(
+  public getDescendantsPage(
     id: string,
-    expand = ["metadata.properties"]
+    start: number = 0,
+    expand = ["metadata.properties", "ancestors"],
   ): Promise<WrappedResult<ContentSummary>> {
-    const url = `content/${id}/descendant/page?limit=${DESCENDANT_LIMIT}&expand=${expand}`;
+    const url =
+      `content/${id}/descendant/page?limit=${DESCENDANT_PAGE_SIZE}&start=${start}&expand=${expand}`;
     return this.get<WrappedResult<ContentSummary>>(url);
   }
 
-  public async isTitleInSpace(title: string, space: Space): Promise<boolean> {
+  public async isTitleUniqueInSpace(
+    title: string,
+    space: Space,
+    idToIgnore: string = "",
+  ): Promise<boolean> {
     const result = await this.fetchMatchingTitlePages(title, space);
-    return result.length > 0;
+
+    if (result.length === 1 && result[0].id === idToIgnore) {
+      return true;
+    }
+
+    return result.length === 0;
   }
 
   public async fetchMatchingTitlePages(
     title: string,
-    space: Space
+    space: Space,
+    isFuzzy: boolean = false,
   ): Promise<Content[]> {
-    const cqlContext =
+    const encodedTitle = encodeURIComponent(title);
+
+    let cql = `title="${encodedTitle}"`;
+
+    const CQL_CONTEXT =
       "%7B%22contentStatuses%22%3A%5B%22archived%22%2C%20%22current%22%2C%20%22draft%22%5D%7D"; //{"contentStatuses":["archived", "current", "draft"]}
-    const cql = `title="${title}" and space=${space.key}&cqlcontext=${cqlContext}`;
+
+    cql = `${cql}&spaces=${space.key}&cqlcontext=${CQL_CONTEXT}`;
+
     const result = await this.get<ContentArray>(`content/search?cql=${cql}`);
     return result?.results ?? [];
   }
 
-  public createContent(content: ContentCreate): Promise<Content> {
+  /**
+   * Perform a test to see if the user can manage permissions.  In the space create a simple test page, attempt to set permissions on it, then delete it.
+   */
+  public async canSetPermissions(
+    parent: ConfluenceParent,
+    space: Space,
+    user: User,
+  ): Promise<boolean> {
+    let result = true;
+
+    const testContent: ContentCreate = buildContentCreate(
+      `quarto-permission-test-${globalThis.crypto.randomUUID()}`,
+      space,
+      {
+        storage: {
+          value: "",
+          representation: "storage",
+        },
+      },
+      "permisson-test",
+    );
+    const testContentCreated = await this.createContent(user, testContent);
+
+    const testContentId = testContentCreated.id ?? "";
+
+    try {
+      await this.put<Content>(
+        `content/${testContentId}/restriction/byOperation/update/user?accountId=${user.accountId}`,
+      );
+    } catch (error) {
+      trace("lockDownResult Error", error);
+      // Note, sometimes a successful call throws a
+      // "SyntaxError: Unexpected end of JSON input"
+      // check for the 403 status only
+      if (error?.status === 403) {
+        result = false;
+      }
+    }
+
+    const contentDelete: ContentDelete = {
+      id: testContentId,
+      contentChangeType: ContentChangeType.delete,
+    };
+    await this.deleteContent(contentDelete);
+
+    return result;
+  }
+
+  public async lockDownPermissions(
+    contentId: string,
+    user: User,
+  ): Promise<any> {
+    try {
+      return await this.put<Content>(
+        `content/${contentId}/restriction/byOperation/update/user?accountId=${user.accountId}`,
+      );
+    } catch (error) {
+      trace("lockDownResult Error", error);
+    }
+  }
+
+  public async createContent(
+    user: User,
+    content: ContentCreate,
+    metadata: Record<string, any> = V2EDITOR_METADATA,
+  ): Promise<Content> {
+    const toCreate = {
+      ...content,
+      ...metadata,
+    };
+
+    trace("to create", toCreate);
     trace("createContent body", content.body.storage.value);
-    const createBody = JSON.stringify(content);
-    return this.post<Content>("content", createBody);
+    const createBody = JSON.stringify(toCreate);
+    const result: Content = await this.post<Content>("content", createBody);
+
+    await this.lockDownPermissions(result.id ?? "", user);
+
+    return result;
+  }
+
+  public async updateContent(
+    user: User,
+    content: ContentUpdate,
+    metadata: Record<string, any> = V2EDITOR_METADATA,
+  ): Promise<Content> {
+    const toUpdate = {
+      ...content,
+      ...metadata,
+    };
+
+    const result = await this.put<Content>(
+      `content/${content.id}`,
+      JSON.stringify(toUpdate),
+    );
+
+    await this.lockDownPermissions(content.id ?? "", user);
+
+    return result;
   }
 
   public createContentProperty(id: string, content: any): Promise<Content> {
     return this.post<Content>(
       `content/${id}/property`,
-      JSON.stringify(content)
+      JSON.stringify(content),
     );
   }
 
-  public updateContent(content: ContentUpdate): Promise<Content> {
-    return this.put<Content>(`content/${content.id}`, JSON.stringify(content));
-  }
-
   public deleteContent(content: ContentDelete): Promise<Content> {
+    trace("deleteContent", content);
     return this.delete<Content>(`content/${content.id}`);
   }
 
@@ -101,8 +213,6 @@ export class ConfluenceClient {
       WrappedResult<AttachmentSummary>
     >(`content/${id}/child/attachment`);
 
-    trace("getAttachments", wrappedResult, LogPrefix.ATTACHMENT);
-
     const result = wrappedResult?.results ?? [];
     return result;
   }
@@ -110,15 +220,15 @@ export class ConfluenceClient {
   public async createOrUpdateAttachment(
     parentId: string,
     file: File,
-    comment: string = ""
+    comment: string = "",
   ): Promise<AttachmentSummary> {
     trace("createOrUpdateAttachment", { file, parentId }, LogPrefix.ATTACHMENT);
 
-    const wrappedResult: WrappedResult<AttachmentSummary> =
-      await this.putAttachment<WrappedResult<AttachmentSummary>>(
+    const wrappedResult: WrappedResult<AttachmentSummary> = await this
+      .putAttachment<WrappedResult<AttachmentSummary>>(
         `content/${parentId}/child/attachment`,
         file,
-        comment
+        comment,
       );
 
     trace("createOrUpdateAttachment", wrappedResult, LogPrefix.ATTACHMENT);
@@ -141,13 +251,13 @@ export class ConfluenceClient {
   private putAttachment = <T>(
     path: string,
     file: File,
-    comment: string = ""
+    comment: string = "",
   ): Promise<T> => this.fetchWithAttachment<T>("PUT", path, file, comment);
 
   private fetch = async <T>(
     method: string,
     path: string,
-    body?: BodyInit | null
+    body?: BodyInit | null,
   ): Promise<T> => {
     const headers = {
       Accept: "application/json",
@@ -168,7 +278,7 @@ export class ConfluenceClient {
     method: string,
     path: string,
     file: File,
-    comment: string = ""
+    comment: string = "",
   ): Promise<T> => {
     // https://blog.hyper.io/uploading-files-with-deno/
     const formData = new FormData();
@@ -206,6 +316,9 @@ export class ConfluenceClient {
       } else {
         return response as unknown as T;
       }
+    } else if (response.status === 403) {
+      // Let parent handle 403 Forbidden, sometimes they are expected
+      throw new ApiError(response.status, response.statusText);
     } else if (response.status !== 200) {
       logError("response.status !== 200", response);
       throw new ApiError(response.status, response.statusText);

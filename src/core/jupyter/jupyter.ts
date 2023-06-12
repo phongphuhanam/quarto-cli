@@ -1,9 +1,8 @@
 /*
-* jupyter.ts
-*
-* Copyright (C) 2020-2022 Posit Software, PBC
-*
-*/
+ * jupyter.ts
+ *
+ * Copyright (C) 2020-2022 Posit Software, PBC
+ */
 
 // deno-lint-ignore-file camelcase
 
@@ -145,12 +144,17 @@ import { figuresDir, inputFilesDir } from "../render.ts";
 import { lines } from "../text.ts";
 import { readYamlFromMarkdown } from "../yaml.ts";
 import { languagesInMarkdown } from "../../execute/engine-shared.ts";
-import { pathWithForwardSlashes, removeIfEmptyDir } from "../path.ts";
+import {
+  normalizePath,
+  pathWithForwardSlashes,
+  removeIfEmptyDir,
+} from "../path.ts";
 import { convertToHtmlSpans, hasAnsiEscapeCodes } from "../ansi-colors.ts";
 import { ProjectContext } from "../../project/types.ts";
 import { mergeConfigs } from "../config.ts";
 import { encode as encodeBase64 } from "encoding/base64.ts";
 import { isIpynbOutput } from "../../config/format.ts";
+import { bookFixups, fixupJupyterNotebook } from "./jupyter-fixups.ts";
 
 export const kQuartoMimeType = "quarto_mimetype";
 export const kQuartoOutputOrder = "quarto_order";
@@ -241,6 +245,25 @@ export interface JupyterOutputError extends JupyterOutput {
   evalue: string;
   traceback: string[];
 }
+
+const countTicks = (code: string[]) => {
+  // FIXME do we need trim() here?
+  const countLeadingTicks = (s: string) => {
+    // count leading ticks using regexps
+    const m = s.match(/^`+/);
+    if (m) {
+      return m[0].length;
+    } else {
+      return 0;
+    }
+  };
+  return Math.max(0, ...code.map((s) => countLeadingTicks(s)));
+};
+
+const ticksForCode = (code: string[]) => {
+  const n = Math.max(3, countTicks(code) + 1);
+  return "`".repeat(n);
+};
 
 export async function quartoMdToJupyter(
   markdown: string,
@@ -442,7 +465,7 @@ export async function jupyterKernelspecFromMarkdown(
   markdown: string,
   project?: ProjectContext,
 ): Promise<[JupyterKernelspec, Metadata]> {
-  const config = (project as any)?.config;
+  const config = project?.config;
   const yaml = config
     ? mergeConfigs(config, readYamlFromMarkdown(markdown))
     : readYamlFromMarkdown(markdown);
@@ -584,7 +607,7 @@ export function jupyterAssets(
   to?: string,
 ): JupyterNotebookAssetPaths {
   // calculate and create directories
-  input = Deno.realPathSync(input);
+  input = normalizePath(input);
   const files_dir = join(dirname(input), inputFilesDir(input));
   const figures_dir = join(files_dir, figuresDir(to));
   ensureDirSync(figures_dir);
@@ -631,6 +654,13 @@ export async function jupyterToMarkdown(
   nb: JupyterNotebook,
   options: JupyterToMarkdownOptions,
 ): Promise<JupyterToMarkdownResult> {
+  // perform fixups
+  const fixups = options.executeOptions.projectType === "book"
+    ? bookFixups
+    : undefined;
+
+  nb = fixupJupyterNotebook(nb, fixups);
+
   // optional content injection / html preservation for html output
   // that isn't an ipynb
   const isHtml = options.toHtml && !options.toIpynb;
@@ -677,6 +707,10 @@ export async function jupyterToMarkdown(
         md.push("\n:::::::::: notes\n\n");
       }
     }
+
+    // find the first yaml metadata block and hold it out
+    // note if it has a title
+    // at the end, if it doesn't have a title, then snip the title out
 
     // markdown from cell
     switch (cell.cell_type) {
@@ -1079,15 +1113,10 @@ async function mdFromCodeCell(
     }
 
     // filter matplotlib intermediate vars
-    if (output.output_type === "execute_result") {
-      const textPlain = (output as JupyterOutputDisplayData).data
-        ?.[kTextPlain] as string[] | undefined;
-      if (
-        textPlain && textPlain.length && textPlain[0].startsWith("[<matplotlib")
-      ) {
-        return false;
-      }
+    if (isDiscadableTextExecuteResult(output)) {
+      return false;
     }
+
     return true;
   }).map((output) => {
     // convert text/latex math to markdown as appropriate
@@ -1218,7 +1247,9 @@ async function mdFromCodeCell(
   // write code if appropriate
   if (includeCode(cell, options)) {
     const fenced = echoFenced(cell, options);
-    const ticks = fenced ? "````" : "```";
+    const ticks = "`".repeat(
+      Math.max(countTicks(cell.source) + 1, fenced ? 4 : 3),
+    );
 
     md.push(ticks + " {");
     if (typeof cell.options[kCellLstLabel] === "string") {
@@ -1481,6 +1512,21 @@ async function mdFromCodeCell(
   return md;
 }
 
+function isDiscadableTextExecuteResult(output: JupyterOutput) {
+  if (output.output_type === "execute_result") {
+    const textPlain = (output as JupyterOutputDisplayData).data
+      ?.[kTextPlain] as string[] | undefined;
+    if (textPlain && textPlain.length) {
+      return [
+        "[<matplotlib",
+        "<seaborn.",
+        "<ggplot:",
+      ].some((startsWith) => textPlain[0].startsWith(startsWith));
+    }
+  }
+  return false;
+}
+
 function hasLayoutOptions(cell: JupyterCellWithOptions) {
   return Object.keys(cell.options).some((key) => key.startsWith("layout"));
 }
@@ -1594,9 +1640,9 @@ which does not appear to be plain text: ${JSON.stringify(data)}`);
       } else {
         if (options.toHtml) {
           if (lines.some(hasAnsiEscapeCodes)) {
-            const html = (await Promise.all(
+            const html = await Promise.all(
               lines.map(convertToHtmlSpans),
-            ));
+            );
             return mdMarkdownOutput(
               [
                 "\n::: {.ansi-escaped-output}\n```{=html}\n<pre>",
@@ -1723,7 +1769,8 @@ function mdMarkdownOutput(md: string[]) {
 }
 
 function mdFormatOutput(format: string, source: string[]) {
-  return mdEnclosedOutput("```{=" + format + "}", source, "```");
+  const ticks = ticksForCode(source);
+  return mdEnclosedOutput(ticks + "{=" + format + "}", source, ticks);
 }
 
 function mdLatexOutput(latex: string[]) {
@@ -1786,8 +1833,9 @@ function mdTrimEmptyLines(
 }
 
 function mdCodeOutput(code: string[], clz?: string) {
-  const open = "```" + (clz ? `{.${clz}}` : "");
-  return mdEnclosedOutput(open, code, "```");
+  const ticks = ticksForCode(code);
+  const open = ticks + (clz ? `{.${clz}}` : "");
+  return mdEnclosedOutput(open, code, ticks);
 }
 
 function mdEnclosedOutput(begin: string, text: string[], end: string) {

@@ -1,9 +1,8 @@
 /*
-* rmd.ts
-*
-* Copyright (C) 2020-2022 Posit Software, PBC
-*
-*/
+ * rmd.ts
+ *
+ * Copyright (C) 2020-2022 Posit Software, PBC
+ */
 
 import { error, info, warning } from "log/mod.ts";
 import { existsSync } from "fs/exists.ts";
@@ -69,11 +68,18 @@ export const knitrEngine: ExecutionEngine = {
     if (markdown === undefined) {
       markdown = mappedStringFromFile(file);
     }
+    let metadata;
+    try {
+      metadata = readYamlFromMarkdown(markdown.value);
+    } catch (e) {
+      error(`Error reading metadata from ${file}.\n${e.message}`);
+      throw e;
+    }
     const target: ExecutionTarget = {
       source: file,
       input: file,
       markdown,
-      metadata: readYamlFromMarkdown(markdown.value),
+      metadata,
     };
     return Promise.resolve(target);
   },
@@ -195,9 +201,9 @@ async function callR<T>(
   outputFilter?: (output: string) => string,
   reportError = true,
 ): Promise<T> {
-  // establish cwd for execute (the current dir if there is an renv
+  // establish cwd for our R scripts (the current dir if there is an renv
   // otherwise the project dir if specified)
-  const cwd = withinActiveRenv() ? undefined : projectDir;
+  const cwd = withinActiveRenv() ? Deno.cwd() : projectDir ?? Deno.cwd();
 
   // create a temp file for writing the results
   const resultsFile = Deno.makeTempFileSync(
@@ -208,6 +214,7 @@ async function callR<T>(
     action,
     params,
     results: resultsFile,
+    wd: cwd,
   });
 
   try {
@@ -272,17 +279,30 @@ function withinActiveRenv() {
 
 async function printCallRDiagnostics() {
   const caps = await knitrCapabilities();
-  if (caps && !caps.rmarkdown) {
-    info("");
-    info("R installation:");
-    info(knitrCapabilitiesMessage(caps, "  "));
-    info("");
-    info(knitrInstallationMessage());
-    info("");
-  } else if (!caps) {
+  if (!caps) {
     info("");
     info(rInstallationMessage());
     info("");
+  } else {
+    if (
+      !caps?.packages.rmarkdown || !caps?.packages.knitr ||
+      !caps?.packages.knitrVersOk
+    ) {
+      info("");
+      info("R installation:");
+      info(knitrCapabilitiesMessage(caps, "  "));
+      info("");
+      info(
+        knitrInstallationMessage(
+          "",
+          caps.packages.knitr && !caps?.packages.knitrVersOk
+            ? "knitr"
+            : "rmarkdown",
+          !!caps.packages.knitr && !caps.packages.knitrVersOk,
+        ),
+      );
+      info("");
+    }
   }
 }
 

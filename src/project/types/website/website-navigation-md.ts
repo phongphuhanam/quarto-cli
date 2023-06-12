@@ -8,7 +8,7 @@ import { dirname, extname, isAbsolute, join } from "path/mod.ts";
 import { Document, Element } from "../../../core/deno-dom.ts";
 
 import { Format, Metadata } from "../../../config/types.ts";
-import { NavItem, Sidebar } from "../../types.ts";
+import { NavItem, Sidebar, SidebarItem } from "../../types.ts";
 
 import {
   kBodyFooter,
@@ -28,13 +28,16 @@ import {
 import { removeChapterNumber } from "./website-utils.ts";
 import { MarkdownPipelineHandler } from "./website-pipeline-md.ts";
 import { safeExistsSync } from "../../../core/path.ts";
+import { md5Hash } from "../../../core/hash.ts";
 
 const kSidebarTitleId = "quarto-int-sidebar-title";
 const kNavbarTitleId = "quarto-int-navbar-title";
 const kNavNextId = "quarto-int-next";
 const kNavPrevId = "quarto-int-prev";
 const kSidebarIdPrefix = "quarto-int-sidebar:";
+const kBreadcrumbPrefix = "quarto-breadcrumbs";
 const kNavbarIdPrefix = "quarto-int-navbar:";
+const kToolsPrefix = "quarto-navbar-tools:";
 
 export interface NavigationPipelineContext {
   source: string;
@@ -43,6 +46,7 @@ export interface NavigationPipelineContext {
   navigation?: Navigation;
   pageMargin?: PageMargin;
   bodyDecorators?: BodyDecorators;
+  breadCrumbs?: SidebarItem[];
   pageNavigation: NavigationPagination;
 }
 
@@ -58,6 +62,7 @@ export function navigationMarkdownHandlers(context: NavigationPipelineContext) {
     footerHandler(context),
     marginHeaderFooterHandler(context),
     bodyHeaderFooterHandler(context),
+    breadCrumbHandler(context),
   ];
 }
 
@@ -191,6 +196,39 @@ const prevPageTitleHandler = (context: NavigationPipelineContext) => {
   };
 };
 
+const safeKey = (key: string) => {
+  return md5Hash(key);
+};
+
+const breadCrumbHandler = (context: NavigationPipelineContext) => {
+  return {
+    getUnrendered() {
+      if (context.breadCrumbs) {
+        const markdown: Record<string, string> = {};
+        for (const item of context.breadCrumbs) {
+          if (item.text) {
+            markdown[`${kBreadcrumbPrefix}-${safeKey(item.text)}`] = item.text;
+          }
+        }
+        return { inlines: markdown };
+      }
+    },
+    processRendered(rendered: Record<string, Element>, doc: Document) {
+      const breadCrumbs = doc.querySelectorAll(
+        ".quarto-page-breadcrumbs .breadcrumb-item > a",
+      );
+      for (const breadCrumb of breadCrumbs) {
+        const breadCrumbEl = breadCrumb as Element;
+        const key = breadCrumbEl.innerText;
+        const renderedEl = rendered[`${kBreadcrumbPrefix}-${safeKey(key)}`];
+        if (renderedEl) {
+          breadCrumbEl.innerHTML = renderedEl.innerHTML;
+        }
+      }
+    },
+  };
+};
+
 const sidebarContentsHandler = (context: NavigationPipelineContext) => {
   return {
     getUnrendered() {
@@ -219,11 +257,14 @@ const sidebarContentsHandler = (context: NavigationPipelineContext) => {
         ".sidebar-item:not(.sidebar-item-section) .sidebar-item-text",
       );
       for (let i = 0; i < sidebarItemEls.length; i++) {
-        const link = sidebarItemEls[i] as Element;
-        const href = link.getAttribute("href");
+        const sidebarEl = sidebarItemEls[i] as Element;
+        const href = sidebarEl.getAttribute("href");
         const sidebarText = rendered[`${kSidebarIdPrefix}${href}`];
         if (sidebarText) {
-          link.innerHTML = sidebarText.innerHTML;
+          const link = sidebarEl.querySelector(".menu-text");
+          if (link) {
+            link.innerHTML = sidebarText.innerHTML;
+          }
         }
       }
 
@@ -231,14 +272,17 @@ const sidebarContentsHandler = (context: NavigationPipelineContext) => {
         ".sidebar-item.sidebar-item-section .sidebar-item-text",
       );
       for (let i = 0; i < sidebarSectionEls.length; i++) {
-        const link = sidebarSectionEls[i] as Element;
-        const target = link.getAttribute("data-bs-target");
+        const sectionEl = sidebarSectionEls[i] as Element;
+        const target = sectionEl.getAttribute("data-bs-target");
 
         if (target) {
           const id = target.slice(1);
           const sectionText = rendered[`${kSidebarIdPrefix}${id}`];
           if (sectionText) {
-            link.innerHTML = sectionText.innerHTML;
+            const link = sectionEl.querySelector(".menu-text");
+            if (link) {
+              link.innerHTML = sectionText.innerHTML;
+            }
           }
         }
       }
@@ -264,6 +308,10 @@ const navbarContentsHandler = (context: NavigationPipelineContext) => {
           if (entry.text) {
             markdown[`${kNavbarIdPrefix}${entry.text.trim()}`] = entry.text;
           }
+          if (entry.href) {
+            markdown[`${kNavbarIdPrefix}${entry.href.trim()}`] = entry.href;
+          }
+
           if (entry.menu?.entries) {
             for (const childEntry of entry.menu) {
               addEntry(childEntry);
@@ -274,6 +322,16 @@ const navbarContentsHandler = (context: NavigationPipelineContext) => {
         entries.forEach((entry) => {
           addEntry(entry);
         });
+
+        const tools = context.navigation.navbar.tools;
+        if (tools) {
+          tools.forEach((tool) => {
+            if (tool.href) {
+              markdown[`${kToolsPrefix}${tool.href.trim()}`] = tool.href;
+            }
+          });
+        }
+
         return { inlines: markdown };
       }
     },
@@ -295,8 +353,37 @@ const navbarContentsHandler = (context: NavigationPipelineContext) => {
               link.innerHTML = renderedEl?.innerHTML;
             }
           }
+
+          // Any rendered hrefs for nav items
+          const textParent = link.parentElement;
+          if (textParent) {
+            const href = textParent.getAttribute("href");
+            if (href) {
+              const renderedHref = rendered[`${kNavbarIdPrefix}${href}`];
+              if (renderedHref) {
+                textParent.setAttribute("href", renderedHref?.innerText);
+              }
+            }
+          }
         }
       });
+
+      // Any tools
+      [".navbar .quarto-navbar-tools .quarto-navigation-tool"].forEach(
+        (sel) => {
+          const toolNodes = doc.querySelectorAll(sel);
+          for (let i = 0; i < toolNodes.length; i++) {
+            const toolEl = toolNodes[i] as Element;
+            const href = toolEl.getAttribute("href");
+            if (href) {
+              const renderedHref = rendered[`${kToolsPrefix}${href}`];
+              if (renderedHref) {
+                toolEl.setAttribute("href", renderedHref?.innerText);
+              }
+            }
+          }
+        },
+      );
     },
   };
 };

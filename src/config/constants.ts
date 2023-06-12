@@ -1,15 +1,15 @@
 /*
-* constants.ts
-*
-* Copyright (C) 2020-2022 Posit Software, PBC
-*
-*/
+ * constants.ts
+ *
+ * Copyright (C) 2020-2022 Posit Software, PBC
+ */
 
 export const kMetadataFormat = "format";
 
 export const kDisplayName = "display-name";
 export const kExtensionName = "extension-name";
 export const kTargetFormat = "target-format";
+export const kBaseFormat = "base-format";
 export const kIdentifierDefaults = "indentifier";
 export const kRenderDefaults = "render";
 export const kExecuteDefaults = "execute";
@@ -76,6 +76,8 @@ export const kCodeTools = "code-tools";
 export const kTblCap = "tbl-cap";
 export const kTblColwidths = "tbl-colwidths";
 export const kMergeIncludes = "merge-includes";
+export const kInlineIncludes = "inline-includes";
+export const kPreserveYaml = "preserve-yaml";
 export const kPreferHtml = "prefer-html";
 export const kSelfContainedMath = "self-contained-math";
 export const kBiblioConfig = "biblio-config";
@@ -99,6 +101,9 @@ export const kLinkExternalFilter = "link-external-filter";
 
 export const kQuartoVersion = "quarto-version";
 export const kQuartoRequired = "quarto-required";
+
+export const kPreviewMode = "preview-mode";
+export const kPreviewModeRaw = "raw";
 
 export const kIdentifierDefaultsKeys = [
   kTargetFormat,
@@ -152,6 +157,9 @@ export const kRenderDefaultsKeys = [
   kCodeTools,
   kShortcodes,
   kTblColwidths,
+  kInlineIncludes,
+  kPreserveYaml,
+  kMergeIncludes,
   kSelfContainedMath,
   kLatexAutoMk,
   kLatexAutoInstall,
@@ -180,11 +188,11 @@ export const kTocTitleWebsite = "toc-title-website";
 export const kRelatedFormatsTitle = "related-formats-title";
 export const kRelatedNotebooksTitle = "related-notebooks-title";
 export const kSourceNotebookPrefix = "source-notebooks-prefix";
-export const kCalloutTipCaption = "callout-tip-caption";
-export const kCalloutNoteCaption = "callout-note-caption";
-export const kCalloutWarningCaption = "callout-warning-caption";
-export const kCalloutImportantCaption = "callout-important-caption";
-export const kCalloutCautionCaption = "callout-caution-caption";
+export const kCalloutTipCaption = "callout-tip-title";
+export const kCalloutNoteCaption = "callout-note-title";
+export const kCalloutWarningCaption = "callout-warning-title";
+export const kCalloutImportantCaption = "callout-important-title";
+export const kCalloutCautionCaption = "callout-caution-title";
 export const kSectionTitleAbstract = "section-title-abstract";
 export const kSectionTitleFootnotes = "section-title-footnotes";
 export const kSectionTitleReferences = "section-title-references";
@@ -209,8 +217,17 @@ export const kCodeToolsHideAllCode = "code-tools-hide-all-code";
 export const kCodeToolsViewSource = "code-tools-view-source";
 export const kCodeToolsSourceCode = "code-tools-source-code";
 export const kSearchNoResultsText = "search-no-results-text";
+export const kSearch = "search";
+
+export const kToggleSection = "toggle-section";
+export const kToggleSidebar = "toggle-sidebar";
+export const kToggleDarkMode = "toggle-dark-mode";
+export const kToggleReaderMode = "toggle-reader-mode";
+export const kToggleNavigation = "toggle-navigation";
+
 export const kCopyButtonTooltip = "copy-button-tooltip";
 export const kCopyButtonTooltipSuccess = "copy-button-tooltip-success";
+export const kBackToTop = "back-to-top";
 export const kRepoActionLinksEdit = "repo-action-links-edit";
 export const kRepoActionLinksSource = "repo-action-links-source";
 export const kRepoActionLinksIssue = "repo-action-links-issue";
@@ -307,8 +324,15 @@ export const kLanguageDefaultsKeys = [
   kCodeToolsViewSource,
   kCodeToolsSourceCode,
   kSearchNoResultsText,
+  kSearch,
+  kToggleDarkMode,
+  kToggleNavigation,
+  kToggleReaderMode,
+  kToggleSidebar,
+  kToggleSection,
   kCopyButtonTooltip,
   kCopyButtonTooltipSuccess,
+  kBackToTop,
   kRepoActionLinksEdit,
   kRepoActionLinksSource,
   kRepoActionLinksIssue,
@@ -385,7 +409,6 @@ export const kReader = "reader";
 export const kWriter = "writer";
 export const kOutputFile = "output-file";
 export const kInputFiles = "input-files";
-export const kAtxHeaders = "atx-headers";
 export const kMarkdownHeadings = "markdown-headings";
 export const kTemplate = "template";
 export const kWrap = "wrap";
@@ -395,6 +418,7 @@ export const kEmbedResources = "embed-resources";
 export const kIncludeBeforeBody = "include-before-body";
 export const kIncludeAfterBody = "include-after-body";
 export const kIncludeInHeader = "include-in-header";
+export const kResourcePath = "resource-path";
 export const kCiteproc = "citeproc";
 export const kCiteMethod = "cite-method";
 export const kFilters = "filters";
@@ -455,6 +479,7 @@ export const kDescription = "description";
 export const kHideDescription = "hide-description";
 export const kTocTitle = "toc-title";
 export const kTocLocation = "toc-location";
+export const kTocExpand = "toc-expand";
 export const kLang = "lang";
 export const kOrder = "order";
 
@@ -493,7 +518,15 @@ export const kCrossrefChaptersAppendix = "chapters-appendix";
 export const kCrossrefChaptersAlpha = "chapters-alpha";
 export const kCrossrefChapterId = "chapter-id";
 
+export const kGrid = "grid";
+export const kContentMode = "content-mode";
+export const kAuto = "auto";
+export const kStandardContent = "standard";
+export const kFullContent = "full";
+export const kSlimContent = "slim";
+
 export const kFigResponsive = "fig-responsive";
+export const kOutputLocation = "output-location";
 
 export const kCapLoc = "cap-location";
 export const kFigCapLoc = "fig-cap-location";
@@ -530,7 +563,7 @@ export const kPandocDefaultsKeys = [
   kIncludeBeforeBody,
   kIncludeAfterBody,
   kIncludeInHeader,
-  "resource-path",
+  kResourcePath,
   kCiteproc,
   kCiteMethod,
   "citation-abbreviations",
@@ -557,7 +590,6 @@ export const kPandocDefaultsKeys = [
   kSectionDivs,
   "identifier-prefix",
   kTitlePrefix,
-  "strip-empty-paragraphs",
   "eol",
   "strip-comments",
   "indented-code-classes",
@@ -581,7 +613,6 @@ export const kPandocDefaultsKeys = [
   kEPubCoverImage,
   "reference-links",
   kReferenceLocation,
-  kAtxHeaders,
   kMarkdownHeadings,
   "track-changes",
   "html-q-tags",
@@ -637,3 +668,6 @@ export const kLayoutVAlign = "layout-valign";
 export const kLayoutNcol = "layout-ncol";
 export const kLayoutNrow = "layout-nrow";
 export const kLayout = "layout";
+
+// https://github.com/quarto-dev/quarto-cli/issues/3581
+export const kCliffyImplicitCwd = "5a6d2e4f-f9a2-43bc-8019-8149fbb76c85";

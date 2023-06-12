@@ -1,13 +1,13 @@
 /*
-* parse-shortcodes.ts
-*
-* Recognizes and parses shortcodes.
-*
-* Copyright (C) 2022 Posit Software, PBC
-*
-*/
+ * parse-shortcodes.ts
+ *
+ * Recognizes and parses shortcodes.
+ *
+ * Copyright (C) 2022 Posit Software, PBC
+ */
 
 import { matchAll } from "./text.ts";
+import { Shortcode } from "./parse-shortcode-types.ts";
 
 export function findInlineShortcodes(content: string) {
   return Array.from(matchAll(content, /{{< (?!\/\*)(.+?)(?<!\*\/) >}}/));
@@ -20,41 +20,77 @@ export function isBlockShortcode(content: string) {
   }
 }
 
-export interface Shortcode {
-  name: string;
-  rawParams: {
-    name?: string;
-    value: string;
-  }[];
-  namedParams: Record<string, string>;
-  params: string[];
+function parseShortcodeCapture(capture: string): Shortcode | undefined {
+  // match shortcode name
+  const nameMatch = capture.match(/^[a-zA-Z0-9_]+/);
+  if (!nameMatch) {
+    return;
+  }
+  const params: Shortcode["params"] = [];
+  const namedParams: Shortcode["namedParams"] = {};
+  const rawParams: Shortcode["rawParams"] = [];
+
+  const name = nameMatch[0];
+  let paramStr = capture.slice(name.length).trim();
+
+  while (paramStr.length) {
+    let paramMatch: RegExpMatchArray | null;
+
+    // first we try to match name=value, name="value", or name='value'
+    paramMatch = paramStr.match(/^[a-zA-Z0-9_-]+="[^"]*"/);
+    if (!paramMatch) {
+      paramMatch = paramStr.match(/^[a-zA-Z0-9_-]+='[^']*'/);
+    }
+    if (!paramMatch) {
+      paramMatch = paramStr.match(/^[a-zA-Z0-9_-]+=[^"'\s]+/);
+    }
+
+    if (paramMatch) {
+      const [name, value] = paramMatch[0].split("=");
+      namedParams[name] = value;
+      rawParams.push({
+        name,
+        value,
+      });
+      paramStr = paramStr.slice(paramMatch[0].length).trim();
+      continue;
+    }
+
+    // then we try to match value, a string without quotes or equals
+    paramMatch = paramStr.match(/^[^"'\s]+/);
+
+    if (paramMatch) {
+      params.push(paramMatch[0]);
+      rawParams.push({
+        value: paramMatch[0],
+      });
+      paramStr = paramStr.slice(paramMatch[0].length).trim();
+      continue;
+    }
+
+    // finally, we try to match a string with double quotes or single quotes
+    paramMatch = paramStr.match(/^"[^"]*"/) || paramStr.match(/^'[^']*'/);
+    if (paramMatch) {
+      params.push(paramMatch[0].slice(1, -1));
+      rawParams.push({
+        value: paramMatch[0].slice(1, -1),
+      });
+      paramStr = paramStr.slice(paramMatch[0].length).trim();
+      continue;
+    }
+
+    throw new Error("invalid shortcode: " + capture);
+  }
+  return { name, params, namedParams, rawParams };
 }
 
+// TODO this should be handled by a pandoc parser.
 export function parseShortcode(shortCodeCapture: string): Shortcode {
-  const [name, ...args] = shortCodeCapture.trim().split(" ");
-  const namedParams: Record<string, string> = {};
-  const params: string[] = [];
-  const rawParams = args.map((v) => {
-    const p = v.indexOf("=");
-    let name: string | undefined = undefined;
-    let value: string;
-    if (p === -1) {
-      value = v;
-      params.push(value);
-    } else {
-      name = v.slice(0, p);
-      value = v.slice(p + 1);
-      namedParams[name] = value;
-    }
-    return { name, value };
-  });
-
-  return {
-    name,
-    rawParams,
-    namedParams,
-    params,
-  };
+  const result = parseShortcodeCapture(shortCodeCapture);
+  if (!result) {
+    throw new Error("invalid shortcode: " + shortCodeCapture);
+  }
+  return result;
 }
 
 export function getShortcodeUnnamedParams(shortcode: Shortcode): string[] {

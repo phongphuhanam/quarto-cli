@@ -30,14 +30,12 @@ import {
 } from "../../../project-index.ts";
 import { ProjectContext } from "../../../types.ts";
 
-import {
-  estimateReadingTimeMinutes,
-  findPreviewImgMd,
-} from "../util/discover-meta.ts";
+import { estimateReadingTimeMinutes } from "../util/discover-meta.ts";
 import {
   ColumnType,
   kCategoryStyle,
   kDefaultMaxDescLength,
+  kExclude,
   kFeed,
   kFieldAuthor,
   kFieldCategories,
@@ -63,6 +61,7 @@ import {
   kImageAlign,
   kImageAlt,
   kImageHeight,
+  kInclude,
   kListing,
   kMaxDescLength,
   kPageSize,
@@ -80,6 +79,7 @@ import {
   ListingSharedOptions,
   ListingSort,
   ListingType,
+  PreviewImage,
   renderedContentReader,
 } from "./website-listing-shared.ts";
 import {
@@ -99,9 +99,14 @@ import { isYamlPath, readYaml } from "../../../../core/yaml.ts";
 import { parseAuthor } from "../../../../core/author.ts";
 import { parsePandocDate, resolveDate } from "../../../../core/date.ts";
 import { ProjectOutputFile } from "../../types.ts";
-import { projectOutputDir } from "../../../project-shared.ts";
-import { directoryMetadataForInputFile } from "../../../project-context.ts";
+import {
+  directoryMetadataForInputFile,
+  projectOutputDir,
+} from "../../../project-shared.ts";
 import { mergeConfigs } from "../../../../core/config.ts";
+import { globToRegExp } from "../../../../core/lib/glob.ts";
+import { cslNames } from "../../../../core/csl.ts";
+import { isHttpUrl } from "../../../../core/url.ts";
 
 // Defaults (a card listing that contains everything
 // in the source document's directory)
@@ -280,7 +285,7 @@ export async function readListings(
   return { listingDescriptors: listingItems, options: sharedOptions };
 }
 
-export function completeListingDescriptions(
+export function completeListingItems(
   context: ProjectContext,
   outputFiles: ProjectOutputFile[],
   _incremental: boolean,
@@ -332,6 +337,79 @@ export function completeListingDescriptions(
         match = regex.exec(fileContents);
       }
       regex.lastIndex = 0;
+
+      // Use a regex to find image placeholders
+      // Placeholders are there to permit images to be appear in the
+      // rendered content (e.g. plots from computations) and for those
+      // to be used. If an image can't be found this way, a placeholder
+      // div will be returned instead.
+      const imgRegex = imagePlaceholderRegex;
+      imgRegex.lastIndex = 0;
+      let imgMatch = imgRegex.exec(fileContents);
+      while (imgMatch) {
+        const progressive = imgMatch[1] === "true";
+        const imgHeight = imgMatch[2];
+        const docRelativePath = imgMatch[3];
+        const docAbsPath = join(projectOutputDir(context), docRelativePath);
+        const imgPlaceholder = imagePlaceholder(
+          docRelativePath,
+          progressive,
+          imgHeight,
+        );
+        if (existsSync(docAbsPath)) {
+          const contents = contentReader(docAbsPath, {
+            remove: { links: true },
+          });
+
+          if (contents.previewImage) {
+            const resolveUrl = (path: string) => {
+              if (isHttpUrl(path)) {
+                return path;
+              } else {
+                const imgAbsPath = isAbsolute(path)
+                  ? path
+                  : join(dirname(docAbsPath), path);
+                const imgRelPath = relative(
+                  dirname(outputFile.file),
+                  imgAbsPath,
+                );
+                return imgRelPath;
+              }
+            };
+
+            const imgHtml = imageSrc(
+              {
+                ...contents.previewImage,
+                src: resolveUrl(contents.previewImage.src),
+              },
+              progressive,
+              imgHeight,
+            );
+
+            fileContents = fileContents.replace(
+              imgPlaceholder,
+              imgHtml,
+            );
+          } else {
+            fileContents = fileContents.replace(
+              imgPlaceholder,
+              emptyDiv(imgHeight),
+            );
+          }
+        } else {
+          fileContents = fileContents.replace(
+            imgPlaceholder,
+            emptyDiv(imgHeight),
+          );
+          warning(
+            `Unable to read listing preview image from ${docRelativePath}`,
+          );
+        }
+
+        imgMatch = imgRegex.exec(fileContents);
+      }
+      imgRegex.lastIndex = 0;
+
       Deno.writeTextFileSync(
         outputFile.file,
         fileContents,
@@ -340,8 +418,26 @@ export function completeListingDescriptions(
   });
 }
 
+function emptyDiv(height?: string) {
+  return `<div class="listing-item-img-placeholder card-img-top" ${
+    height ? `style="height: ${height};"` : ""
+  }>&nbsp;</div>`;
+}
+
 function descriptionPlaceholder(file?: string, maxLength?: number): string {
   return file ? `<!-- desc(5A0113B34292)[max=${maxLength}]:${file} -->` : "";
+}
+
+export function imagePlaceholder(
+  file: string,
+  progressive: boolean,
+  height?: string,
+): string {
+  return file
+    ? `<!-- img(9CEB782EFEE6)[progressive=${
+      progressive ? "true" : "false"
+    }, height=${height ? height : ""}]:${file} -->`
+    : "";
 }
 
 export function isPlaceHolder(text: string) {
@@ -350,6 +446,9 @@ export function isPlaceHolder(text: string) {
 
 const descriptionPlaceholderRegex =
   /<!-- desc\(5A0113B34292\)\[max\=(.*)\]:(.*) -->/;
+
+const imagePlaceholderRegex =
+  /<!-- img\(9CEB782EFEE6\)\[progressive\=(.*), height\=(.*)\]:(.*) -->/;
 
 function hydrateListing(
   format: Format,
@@ -382,7 +481,10 @@ function hydrateListing(
     if (sources.size === 1 && sources.has(ListingItemSource.rawfile)) {
       // If all the items are raw files, we should just show file info
       return [kFieldFileName, kFieldFileModified];
-    } else if (!sources.has(ListingItemSource.document)) {
+    } else if (
+      !sources.has(ListingItemSource.document) &&
+      !sources.has(ListingItemSource.metadataDocument)
+    ) {
       // If the items have come from metadata, we should just show
       // all the columns in the table. Otherwise, we should use the
       // document default columns
@@ -396,6 +498,10 @@ function hydrateListing(
 
   // Don't include fields that the items don't have
   const fields = suggestedFields.filter((field) => {
+    // Always include image if suggeted
+    if (field === kFieldImage) {
+      return true;
+    }
     return itemFields.includes(field);
   });
   const finalFields = fields.length > 0 ? fields : itemFields;
@@ -458,7 +564,9 @@ function hydrateListing(
     ]
     : undefined;
   if (
-    sort && !listingHydrated.sort && sources.has(ListingItemSource.document)
+    sort && !listingHydrated.sort &&
+    (sources.has(ListingItemSource.document) ||
+      sources.has(ListingItemSource.metadataDocument))
   ) {
     listingHydrated.sort = sort;
   }
@@ -607,18 +715,19 @@ async function readContents(
           const yaml = readYaml(file);
           if (Array.isArray(yaml)) {
             const items = yaml as Array<unknown>;
-            for (const item of items) {
-              if (typeof (item) === "object") {
-                const listingItem = await listItemFromMeta(
-                  item as Metadata,
+            for (const yamlItem of items) {
+              if (typeof (yamlItem) === "object") {
+                const { item, source } = await listItemFromMeta(
+                  yamlItem as Metadata,
                   project,
                   listing,
+                  dirname(file),
                 );
-                validateItem(listing, listingItem, (field: string) => {
+                validateItem(listing, item, (field: string) => {
                   return `An item from the file '${file}' is missing the required field '${field}'.`;
                 });
-                listingItemSources.add(ListingItemSource.metadata);
-                listingItems.push(listingItem);
+                listingItemSources.add(source);
+                listingItems.push(item);
               } else {
                 throw new Error(
                   `Unexpected listing contents in file ${file}. The array may only contain listing items, not paths or other types of data.`,
@@ -626,16 +735,17 @@ async function readContents(
               }
             }
           } else if (typeof (yaml) === "object") {
-            const listingItem = await listItemFromMeta(
+            const { item, source } = await listItemFromMeta(
               yaml as Metadata,
               project,
               listing,
+              dirname(file),
             );
-            validateItem(listing, listingItem, (field: string) => {
+            validateItem(listing, item, (field: string) => {
               return `The item defined in file '${file}' is missing the required field '${field}'.`;
             });
-            listingItemSources.add(ListingItemSource.metadata);
-            listingItems.push(listingItem);
+            listingItemSources.add(source);
+            listingItems.push(item);
           } else {
             throw new Error(
               `Unexpected listing contents in file ${file}. The file should contain only one more listing items.`,
@@ -667,17 +777,91 @@ async function readContents(
   // Process any metadata that appears in contents
   if (contentMetadatas.length > 0) {
     for (const content of contentMetadatas) {
-      const listingItem = await listItemFromMeta(content, project, listing);
-      validateItem(listing, listingItem, (field: string) => {
+      const { item, source: itemSource } = await listItemFromMeta(
+        content,
+        project,
+        listing,
+        dirname(source),
+      );
+      validateItem(listing, item, (field: string) => {
         return `An item in the listing '${listing.id}' is missing the required field '${field}'.`;
       });
-      listingItemSources.add(ListingItemSource.metadata);
-      listingItems.push(listingItem);
+      listingItemSources.add(itemSource);
+      listingItems.push(item);
     }
   }
 
+  const matchesField = (item: ListingItem, field: string, value: unknown) => {
+    const simpleValueMatches = (
+      itemValue: unknown,
+      listingValue: unknown,
+    ) => {
+      if (
+        typeof (itemValue) === "string" && typeof (listingValue) === "string"
+      ) {
+        const regex = globToRegExp(listingValue);
+        return itemValue.match(regex);
+      } else {
+        return itemValue === listingValue;
+      }
+    };
+
+    const valueMatches = (
+      item: ListingItem,
+      field: string,
+      value: unknown,
+    ) => {
+      if (Array.isArray(item[field])) {
+        const fieldValues = item[field] as Array<unknown>;
+        return fieldValues.some((fieldVal) => {
+          return simpleValueMatches(fieldVal, value);
+        });
+      } else {
+        return simpleValueMatches(item[field], value);
+      }
+    };
+
+    if (Array.isArray(value)) {
+      return value.some((val) => {
+        return valueMatches(item, field, val);
+      });
+    } else {
+      return valueMatches(item, field, value);
+    }
+  };
+
+  // Apply any listing filters
+  let filtered = listingItems;
+  const includes = listing[kInclude] as Record<string, unknown>;
+  if (includes) {
+    debug(
+      `[listing] applying filter to include only items matching ${includes}`,
+    );
+
+    const fields = Object.keys(includes);
+    filtered = filtered.filter((item) => {
+      return fields.every((field) => {
+        return matchesField(item, field, includes[field]);
+      });
+    });
+
+    debug(`[listing] afer including, ${filtered.length} item match listing`);
+  }
+
+  const excludes = listing[kExclude] as Record<string, unknown>;
+  if (excludes) {
+    debug(`[listing] applying filter to exclude items matching ${includes}`);
+    const fields = Object.keys(excludes);
+    filtered = filtered.filter((item) => {
+      return !fields.some((field) => {
+        return matchesField(item, field, excludes[field]);
+      });
+    });
+    debug(`[listing] afer excluding, ${filtered.length} item match listing`);
+  }
+
   return {
-    items: listingItems,
+    items: filtered,
     sources: listingItemSources,
   };
 }
@@ -715,8 +899,10 @@ async function listItemFromMeta(
   meta: Metadata,
   project: ProjectContext,
   listing: ListingDehydrated,
+  baseDir: string,
 ) {
   let listingItem = cloneDeep(meta);
+  let source = ListingItemSource.metadata;
 
   // If there is a path, try to complete the filename and
   // modified values
@@ -728,7 +914,11 @@ async function listItemFromMeta(
 
     const markdownExtensions = [".qmd", ".md", ".rmd"];
     if (markdownExtensions.indexOf(extension) !== -1) {
-      const fileListing = await listItemFromFile(meta.path, project, listing);
+      const inputPath = isAbsolute(meta.path)
+        ? meta.path
+        : join(baseDir, meta.path);
+
+      const fileListing = await listItemFromFile(inputPath, project, listing);
       if (fileListing === undefined) {
         warning(
           `Draft document ${meta.path} found in a custom listing: item will not have computed metadata.`,
@@ -738,6 +928,7 @@ async function listItemFromMeta(
           ...(fileListing.item || {}),
           ...listingItem,
         };
+        source = ListingItemSource.metadataDocument;
       }
     }
   }
@@ -758,7 +949,10 @@ async function listItemFromMeta(
     }
   }
 
-  return listingItem;
+  return {
+    item: listingItem,
+    source,
+  };
 }
 
 async function listItemFromFile(
@@ -766,6 +960,9 @@ async function listItemFromFile(
   project: ProjectContext,
   listing: ListingDehydrated,
 ) {
+  if (!isAbsolute(input)) {
+    throw new Error(`Internal Error: input path ${input} must be absolute.`);
+  }
   const projectRelativePath = relative(project.dir, input);
   const target = await inputTargetIndex(
     project,
@@ -793,8 +990,8 @@ async function listItemFromFile(
     return undefined;
   } else {
     if (
-      !docRawMetadata && extname(input) === ".qmd" ||
-      extname(input) === ".ipynb"
+      !docRawMetadata && (extname(input) === ".qmd" ||
+        extname(input) === ".ipynb")
     ) {
       warning(
         `File ${input} in the listing '${listing.id}' contains no metadata.`,
@@ -813,8 +1010,7 @@ async function listItemFromFile(
       documentMeta?.abstract as string ||
       descriptionPlaceholder(inputTarget?.outputHref, maxDescLength);
 
-    const imageRaw = documentMeta?.image as string ||
-      findPreviewImgMd(target?.markdown.markdown);
+    const imageRaw = documentMeta?.image as string;
     const image = imageRaw !== undefined
       ? pathWithForwardSlashes(
         listingItemHref(imageRaw, dirname(projectRelativePath)),
@@ -834,7 +1030,17 @@ async function listItemFromFile(
       : undefined;
 
     const authors = parseAuthor(documentMeta?.author);
-    const author = authors ? authors.map((auth) => auth.name) : [];
+    let structuredAuthors;
+    if (authors) {
+      structuredAuthors = cslNames(
+        authors?.filter((auth) => auth !== undefined).map((auth) => auth?.name),
+      );
+    }
+    const author = structuredAuthors
+      ? structuredAuthors.map((auth) =>
+        auth.literal || `${auth.given} ${auth.family}`
+      )
+      : [];
 
     const readingtime = target?.markdown
       ? estimateReadingTimeMinutes(target.markdown.markdown)
@@ -849,6 +1055,7 @@ async function listItemFromFile(
     const item: ListingItem = {
       ...documentMeta,
       path: `/${projectRelativePath}`,
+      outputHref: inputTarget?.outputHref,
       [kFieldTitle]: target?.title,
       [kFieldDate]: date,
       [kFieldDateModified]: datemodified,
@@ -868,6 +1075,16 @@ async function listItemFromFile(
         : ListingItemSource.rawfile,
     };
   }
+}
+
+function imageSrc(image: PreviewImage, progressive: boolean, height?: string) {
+  return `<p class="card-img-top"><img ${
+    progressive ? "data-src" : "src"
+  }="${image.src}" ${image.alt ? `alt="${image.alt}" ` : ""}${
+    height ? `style="height: ${height};" ` : ""
+  }${
+    image.title ? `title="${image.title}"` : ""
+  } class="thumbnail-image card-img"/></p>`;
 }
 
 // Processes the 'listing' metadata into an

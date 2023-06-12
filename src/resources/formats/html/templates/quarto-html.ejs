@@ -182,9 +182,24 @@ window.document.addEventListener("DOMContentLoaded", function (event) {
 
   <% if (copyCode) { %>
 
+  const isCodeAnnotation = (el) => {
+    for (const clz of el.classList) {
+      if (clz.startsWith('code-annotation-')) {                     
+        return true;
+      }
+    }
+    return false;
+  }
+
   const clipboard = new window.ClipboardJS('.code-copy-button', {
-    target: function(trigger) {
-      return trigger.previousElementSibling;
+    text: function(trigger) {
+      const codeEl = trigger.previousElementSibling.cloneNode(true);
+      for (const childEl of codeEl.children) {
+        if (isCodeAnnotation(childEl)) {
+          childEl.remove();
+        }
+      }
+      return codeEl.innerText;
     }
   });
 
@@ -380,8 +395,8 @@ window.document.addEventListener("DOMContentLoaded", function (event) {
               div.style.position = 'absolute';
               parent.appendChild(div);
             }
-            div.style.top = top - 1 + "px";
-            div.style.height = height + "px";
+            div.style.top = top - 2 + "px";
+            div.style.height = height + 4 + "px";
             
             let gutterDiv = window.document.getElementById("code-annotation-line-highlight-gutter");
             if (gutterDiv === null) {
@@ -393,8 +408,8 @@ window.document.addEventListener("DOMContentLoaded", function (event) {
               gutter.appendChild(gutterDiv);
             }
 
-            gutterDiv.style.top = top - 1 + "px";
-            gutterDiv.style.height = height + "px";
+            gutterDiv.style.top = top - 2 + "px";
+            gutterDiv.style.height = height + 4 + "px";
           }
           selectedAnnoteEl = annoteEl;
         }
@@ -412,7 +427,7 @@ window.document.addEventListener("DOMContentLoaded", function (event) {
       };
     <% } %>
 
-    <% if (codeAnnotations === "below")  { %>
+    <% if (codeAnnotations === true || codeAnnotations === "below")  { %>
       
       // Attach click handler to the DT
       const annoteDls = window.document.querySelectorAll('dt[data-target-cell]');
@@ -581,8 +596,10 @@ window.document.addEventListener("DOMContentLoaded", function (event) {
 
   <% if (linkExternalIcon || linkExternalNewwindow) { %>
     var localhostRegex = new RegExp(/^(?:http|https):\/\/localhost\:?[0-9]*\//);
-    <% if (linkExternalFilter) { %>
+    <% if (linkExternalFilter && linkExternalFilter.match(/\\\\/)) { %>
       <%- `var filterRegex = new RegExp(/${linkExternalFilter}/);` %>
+    <% } else if (linkExternalFilter) { %>
+      <%= `var filterRegex = new RegExp("${linkExternalFilter}");` %>
     <% } else { %>
       var filterRegex = new RegExp('/' + window.location.host + '/');
     <% } %>
@@ -590,7 +607,7 @@ window.document.addEventListener("DOMContentLoaded", function (event) {
         return filterRegex.test(href) || localhostRegex.test(href);
     }
     // Inspect non-navigation links and adorn them if external
- 	var links = window.document.querySelectorAll('a:not(.nav-link):not(.navbar-brand):not(.toc-action):not(.sidebar-link):not(.sidebar-item-toggle):not(.pagination-link):not(.no-external):not([aria-hidden]):not(.dropdown-item)');
+ 	var links = window.document.querySelectorAll('a[href]:not(.nav-link):not(.navbar-brand):not(.toc-action):not(.sidebar-link):not(.sidebar-item-toggle):not(.pagination-link):not(.no-external):not([aria-hidden]):not(.dropdown-item)');
     for (var i=0; i<links.length; i++) {
       const link = links[i];
       if (!isInternal(link.href)) {

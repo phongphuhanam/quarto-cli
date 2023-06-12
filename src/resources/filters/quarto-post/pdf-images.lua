@@ -20,9 +20,44 @@ local function convert_svg(path)
   end
 end
 
+local mimeImgExts = {
+  ["image/jpeg"]="jpg",
+  ["image/gif"]="gif",
+  ["image/vnd.microsoft.icon"]="ico",
+  ["image/avif"]="avif",
+  ["image/bmp"]="bmp",
+  ["image/png"]="png",
+  ["image/svg+xml"]="svg",
+  ["image/tiff"]="tif",
+  ["image/webp"]="webp",
+}
+
+
 -- A cache of image urls that we've resolved into the mediabag
 -- keyed by {url: mediabagpath}
 local resolvedUrls = {}
+
+-- windows has a max path length of 260 characters
+-- but we'll be conservative since we're sometimes appending a number
+local windows_safe_filename = function(filename)
+  -- pull the first 200 characters without the extension
+  local stem, ext = pandoc.path.split_extension(filename)
+  local safeStem = stem:sub(1, 20)
+
+  local result = safeStem .. ext
+
+  if #ext > 40 then
+    -- if the extension is too long, truncate it
+    result = safeStem .. ext:sub(1, 40)
+  end
+  return result
+end
+
+-- replace invalid tex characters with underscores
+local tex_safe_filename = function(filename)
+  -- return filename
+  return filename:gsub("[ <>()|:&;#?*'\\/]", '-')
+end
 
 function pdfImages() 
   return {
@@ -85,10 +120,33 @@ function pdfImages()
               image.src = resolvedUrls[image.src]
               return image
             else 
-              local relativePath = image.src:match('http[s]://[%w%.%:]+/(.+)')
+              local relativePath = image.src:match('https?://[%w%.%:]+/(.+)')
               if relativePath then
+
                 local imgMt, imgContents = pandoc.mediabag.fetch(image.src)
-                local filename = pandoc.path.filename(relativePath)
+                local decodedSrc = fullyUrlDecode(image.src)                
+                if decodedSrc == nil then
+                  decodedSrc = "unknown"
+                end
+
+                local function filenameFromMimeType(filename, imgMt)
+                  -- Use the mime type to compute an extension when possible
+                  -- This will allow pandoc to properly know the type, even when 
+                  -- the path to the image is a difficult to parse URI
+                  local mimeExt = mimeImgExts[imgMt]
+                  if mimeExt then
+                    local stem, _ext = pandoc.path.split_extension(filename)
+                    return stem .. '.' .. mimeExt
+                  else
+                    return filename
+                  end
+                end
+
+                -- compute the filename for this file
+                local basefilename = pandoc.path.filename(decodedSrc)
+                local safefilename = windows_safe_filename(tex_safe_filename(basefilename))
+                local filename = filenameFromMimeType(safefilename, imgMt)
+
                 if imgMt ~= nil then
                   local existingMt = pandoc.mediabag.lookup(filename)
                   local counter = 1
@@ -96,6 +154,7 @@ function pdfImages()
                     local stem, ext = pandoc.path.split_extension(filename)
                     filename = stem .. counter .. ext
                     existingMt = pandoc.mediabag.lookup(filename)
+                    counter = counter + 1
                   end
                   resolvedUrls[image.src] = filename
                   pandoc.mediabag.insert(filename, imgMt, imgContents)
@@ -110,4 +169,5 @@ function pdfImages()
     end
   }
 end
+
 

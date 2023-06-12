@@ -1,9 +1,8 @@
 /*
-* format-reveal.ts
-*
-* Copyright (C) 2020-2022 Posit Software, PBC
-*
-*/
+ * format-reveal.ts
+ *
+ * Copyright (C) 2020-2022 Posit Software, PBC
+ */
 import { join } from "path/mod.ts";
 
 import { Document, Element, NodeType } from "../../core/deno-dom.ts";
@@ -33,10 +32,8 @@ import { findParent } from "../../core/html.ts";
 import { createHtmlPresentationFormat } from "../formats-shared.ts";
 import { pandocFormatWith } from "../../core/pandoc/pandoc-formats.ts";
 import { htmlFormatExtras } from "../html/format-html.ts";
-import {
-  revealPluginExtras,
-  RevealPluginScript,
-} from "./format-reveal-plugin.ts";
+import { revealPluginExtras } from "./format-reveal-plugin.ts";
+import { RevealPluginScript } from "./format-reveal-plugin-types.ts";
 import { revealTheme } from "./format-reveal-theme.ts";
 import {
   revealMuliplexPreviewFile,
@@ -70,6 +67,7 @@ import {
 import { revealMetadataFilter } from "./metadata.ts";
 import { ProjectContext } from "../../project/types.ts";
 import { titleSlidePartial } from "./format-reveal-title.ts";
+import { registerWriterFormatHandler } from "../format-handlers.ts";
 
 export function revealResolveFormat(format: Format) {
   format.metadata = revealMetadataFilter(format.metadata);
@@ -257,7 +255,7 @@ export function revealjsFormat() {
             navigationMode === "grid";
 
           // if the user set slideNumber to true then provide
-          // linear slides (if they havne't specified vertical slides)
+          // linear slides (if they haven't specified vertical slides)
           if (format.metadata["slideNumber"] === true) {
             extras.metadataOverride!["slideNumber"] = verticalSlides
               ? "h.v"
@@ -391,6 +389,8 @@ function revealHtmlPostprocessor(
       const titleSlide = doc.getElementById("title-slide");
       if (titleSlide) {
         titleSlide.removeAttribute("id");
+        // required for title-slide-style: pandoc
+        titleSlide.classList.add("quarto-title-block");
       }
     }
 
@@ -406,6 +406,16 @@ function revealHtmlPostprocessor(
         scriptEl.innerText = scriptEl.innerText.replace(
           /slideNumber: (h[\.\/]v|c(?:\/t)?)/,
           "slideNumber: '$1'",
+        );
+
+        // quote width and heigh if in %
+        scriptEl.innerText = scriptEl.innerText.replace(
+          /width: (\d+(\.\d+)?%)/,
+          "width: '$1'",
+        );
+        scriptEl.innerText = scriptEl.innerText.replace(
+          /height: (\d+(\.\d+)?%)/,
+          "height: '$1'",
         );
 
         // plugin registration
@@ -445,7 +455,7 @@ function revealHtmlPostprocessor(
     const invisibleSlides = doc.querySelectorAll(
       'section.slide[data-visibility="hidden"]',
     );
-    for (let i = (invisibleSlides.length - 1); i >= 0; i--) {
+    for (let i = invisibleSlides.length - 1; i >= 0; i--) {
       const slide = invisibleSlides.item(i);
       // remove from toc
       const id = (slide as Element).id;
@@ -454,7 +464,7 @@ function revealHtmlPostprocessor(
           'nav[role="doc-toc"] a[href="#/' + id + '"]',
         );
         if (tocEntry) {
-          tocEntry.parentNode?.remove();
+          tocEntry.parentElement?.remove();
         }
       }
 
@@ -510,7 +520,9 @@ function revealHtmlPostprocessor(
     // doing this now the odds a user would want all of their
     // slides cnetered but NOT the title slide are close to zero
     if (format.metadata[kCenterTitleSlide] !== false) {
-      const titleSlide = doc.getElementById("title-slide") as Element;
+      const titleSlide = doc.getElementById("title-slide") as Element ??
+        // when hash-type: number, id are removed
+        doc.querySelector(".reveal .slides section.quarto-title-block");
       if (titleSlide) {
         titleSlide.classList.add("center");
       }
@@ -608,7 +620,7 @@ function revealHtmlPostprocessor(
     if (slideFootnotes) {
       // we are using slide based footnotes so remove footnotes slide from end
       for (const footnoteSection of footnotes) {
-        footnoteSection.remove();
+        (footnoteSection as Element).remove();
       }
     } else {
       let footnotesId: string | undefined;
@@ -669,6 +681,23 @@ function revealHtmlPostprocessor(
       const chalkboardSrc = (chalkboard as Record<string, unknown>)["src"];
       if (typeof (chalkboardSrc) === "string") {
         result.resources.push(chalkboardSrc);
+      }
+    }
+
+    // https://github.com/quarto-dev/quarto-cli/issues/3533
+    // redirect anchors to the slide they refer to
+    const anchors = doc.querySelectorAll("a[href^='#/']");
+    for (const anchor of anchors) {
+      const anchorEl = anchor as Element;
+      const href = anchorEl.getAttribute("href");
+      if (href) {
+        const target = doc.getElementById(href.replace(/^#\//, ""));
+        if (target) {
+          const slide = findParentSlide(target);
+          if (slide && slide.getAttribute("id")) {
+            anchorEl.setAttribute("href", `#/${slide.getAttribute("id")}`);
+          }
+        }
       }
     }
 
@@ -846,3 +875,12 @@ function findParentSlide(el: Element, slideClass = "slide") {
     return el.classList.contains(slideClass);
   });
 }
+
+registerWriterFormatHandler((format) => {
+  switch (format) {
+    case "revealjs":
+      return {
+        format: revealjsFormat(),
+      };
+  }
+});

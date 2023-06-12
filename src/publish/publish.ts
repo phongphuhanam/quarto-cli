@@ -1,9 +1,8 @@
 /*
-* publish.ts
-*
-* Copyright (C) 2020-2022 Posit Software, PBC
-*
-*/
+ * publish.ts
+ *
+ * Copyright (C) 2020-2022 Posit Software, PBC
+ */
 
 import * as ld from "../core/lodash.ts";
 
@@ -19,15 +18,17 @@ import {
 } from "path/mod.ts";
 
 import {
-  AccountToken,
+  InputMetadata,
   PublishFiles,
   PublishProvider,
-  InputMetadata,
-} from "./provider.ts";
+} from "./provider-types.ts";
+
+import { AccountToken } from "./provider-types.ts";
 
 import { PublishOptions } from "./types.ts";
 
-import { render, renderServices } from "../command/render/render-shared.ts";
+import { render } from "../command/render/render-shared.ts";
+import { renderServices } from "../command/render/render-services.ts";
 import { projectOutputDir } from "../project/project-shared.ts";
 import { PublishRecord } from "../publish/types.ts";
 import { ProjectContext } from "../project/types.ts";
@@ -44,6 +45,7 @@ import { gfmAutoIdentifier } from "../core/pandoc/pandoc-id.ts";
 import { RenderResultFile } from "../command/render/types.ts";
 import { isHtmlContent, isPdfContent } from "../core/mime.ts";
 import { RenderFlags } from "../command/render/types.ts";
+import { normalizePath } from "../core/path.ts";
 
 export const kSiteContent = "site";
 export const kDocumentContent = "document";
@@ -53,11 +55,11 @@ export async function publishSite(
   provider: PublishProvider,
   account: AccountToken,
   options: PublishOptions,
-  target?: PublishRecord
+  target?: PublishRecord,
 ) {
   // create render function
   const renderForPublish = async (
-    flags?: RenderFlags
+    flags?: RenderFlags,
   ): Promise<PublishFiles> => {
     let metadataByInput: Record<string, InputMetadata> = {};
 
@@ -81,7 +83,7 @@ export async function publishSite(
             };
             return accumulatedResult;
           },
-          {}
+          {},
         );
 
         if (result.error) {
@@ -118,7 +120,7 @@ export async function publishSite(
     siteSlug,
     renderForPublish,
     options,
-    target
+    target,
   );
   if (publishRecord) {
     // write publish record if the id wasn't explicitly provided
@@ -127,7 +129,7 @@ export async function publishSite(
         project,
         provider.name,
         account,
-        publishRecord
+        publishRecord,
       );
     }
   }
@@ -141,7 +143,7 @@ export async function publishDocument(
   provider: PublishProvider,
   account: AccountToken,
   options: PublishOptions,
-  target?: PublishRecord
+  target?: PublishRecord,
 ) {
   // establish title
   let title = basename(document, extname(document));
@@ -153,7 +155,7 @@ export async function publishDocument(
 
   // create render function
   const renderForPublish = async (
-    flags?: RenderFlags
+    flags?: RenderFlags,
   ): Promise<PublishFiles> => {
     const files: string[] = [];
     if (options.render) {
@@ -166,6 +168,33 @@ export async function publishDocument(
         });
         if (result.error) {
           throw result.error;
+        }
+
+        // convert the result to be document relative (if the file was in a project
+        // then it will be project relative, which doesn't conform to the expectations
+        // of downstream code)
+        if (result.baseDir) {
+          result.baseDir = normalizePath(result.baseDir);
+          const docDir = normalizePath(dirname(document));
+          if (result.baseDir !== docDir) {
+            const docRelative = (file: string) => {
+              if (!isAbsolute(file)) {
+                file = join(result.baseDir!, file);
+              }
+              return relative(docDir, file);
+            };
+            result.files = result.files.map((resultFile) => {
+              return {
+                ...resultFile,
+                file: docRelative(resultFile.file),
+                supporting: resultFile.supporting
+                  ? resultFile.supporting.map(docRelative)
+                  : undefined,
+                resourceFiles: resultFile.resourceFiles.map(docRelative),
+              };
+            });
+            result.baseDir = docDir;
+          }
         }
 
         // populate files
@@ -202,14 +231,20 @@ export async function publishDocument(
           if (resultFile.supporting) {
             files.push(
               ...resultFile.supporting
-                .map((sf) => Deno.realPathSync(sf))
-                .map(asRelative)
+                .map((sf) => {
+                  if (!isAbsolute(sf)) {
+                    return join(baseDir, sf);
+                  } else {
+                    return sf;
+                  }
+                })
+                .map(asRelative),
             );
           }
           files.push(...resultFile.resourceFiles.map(asRelative));
         }
         return normalizePublishFiles({
-          baseDir,
+          baseDir: result.outputDir ? join(baseDir, result.outputDir) : baseDir,
           rootFile: rootFile!,
           files,
         });
@@ -249,7 +284,7 @@ export async function publishDocument(
         });
       } else {
         throw new Error(
-          `The specifed document (${document}) is not a valid quarto input file`
+          `The specifed document (${document}) is not a valid quarto input file`,
         );
       }
     }
@@ -264,7 +299,7 @@ export async function publishDocument(
     gfmAutoIdentifier(title, false),
     renderForPublish,
     options,
-    target
+    target,
   );
   if (publishRecord) {
     // write publish record if the id wasn't explicitly provided

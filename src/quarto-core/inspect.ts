@@ -1,9 +1,8 @@
 /*
-* inspect.ts
-*
-* Copyright (C) 2020-2022 Posit Software, PBC
-*
-*/
+ * inspect.ts
+ *
+ * Copyright (C) 2020-2022 Posit Software, PBC
+ */
 
 import { existsSync } from "fs/mod.ts";
 import { dirname, join, relative } from "path/mod.ts";
@@ -26,8 +25,8 @@ import { kLocalDevelopment, quartoConfig } from "../core/quarto.ts";
 import { ProjectConfig, ProjectFiles } from "../project/types.ts";
 import { cssFileResourceReferences } from "../core/css.ts";
 import { projectExcludeDirs } from "../project/project-shared.ts";
-import { safeExistsSync } from "../core/path.ts";
-import { kExtensionDir } from "../extension/extension-shared.ts";
+import { normalizePath, safeExistsSync } from "../core/path.ts";
+import { kExtensionDir } from "../extension/constants.ts";
 import { extensionFilesFromDirs } from "../extension/extension.ts";
 
 export interface InspectedConfig {
@@ -130,7 +129,7 @@ export async function inspectConfig(path: string): Promise<InspectedConfig> {
       );
 
       const context = await projectContext(path);
-      const fileDir = Deno.realPathSync(dirname(path));
+      const fileDir = normalizePath(dirname(path));
 
       const excludeDirs = context ? projectExcludeDirs(context) : [];
 

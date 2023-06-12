@@ -20,6 +20,8 @@
   contexts: [div]
   filter: "\\.callout"
   completions:
+    - value: 'title="$0"'
+      doc: "Title displayed in callout header"
     - value: 'icon="true"'
       doc: Include an icon in the callout.
     - value: 'icon="false"'
@@ -98,7 +100,7 @@
       doc: Extend content to full width (with a small margin and shading)
     - value: ".column-screen-inset-left"
       doc: Extend content fully to the left (with a small margin)
-    - value: ".column-screen-inset-left"
+    - value: ".column-screen-inset-right"
       doc: Extend content fully to the right (with a small margin)
     - value: ".column-screen"
       doc: Extend content to full width

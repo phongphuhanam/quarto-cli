@@ -1,9 +1,8 @@
 /*
-* format-reveal-theme.ts
-*
-* Copyright (C) 2021-2022 Posit Software, PBC
-*
-*/
+ * format-reveal-theme.ts
+ *
+ * Copyright (C) 2021-2022 Posit Software, PBC
+ */
 
 import { dirname, join, relative } from "path/mod.ts";
 import { existsSync } from "fs/mod.ts";
@@ -30,7 +29,6 @@ import {
 } from "../../core/sass.ts";
 
 import { kRevealJsUrl } from "./constants.ts";
-import { cssHasDarkModeSentinel } from "../../command/render/pandoc-html.ts";
 import { resolveTextHighlightingLayer } from "../html/format-html-scss.ts";
 import { quartoBaseLayer } from "../html/format-html-shared.ts";
 import { TempContext } from "../../core/temp.ts";
@@ -38,6 +36,7 @@ import { hasAdaptiveTheme } from "../../quarto-core/text-highlighting.ts";
 import { copyMinimal, copyTo } from "../../core/copy.ts";
 import { titleSlideScss } from "./format-reveal-title.ts";
 import { asCssFont, asCssNumber } from "../../core/css.ts";
+import { cssHasDarkModeSentinel } from "../../core/pandoc/css.ts";
 
 export const kRevealLightThemes = [
   "white",
@@ -93,6 +92,13 @@ export async function revealTheme(
     copyMinimal(join(revealSrcDir, dir), join(revealDestDir, dir));
   });
 
+  // Resolve load paths
+  const cssThemeDir = join(revealSrcDir, "css", "theme");
+  const loadPaths = [
+    join(cssThemeDir, "source"),
+    join(cssThemeDir, "template"),
+  ];
+
   // theme is either user provided scss or something in our 'themes' dir
   // (note that standard reveal scss themes must be converted to quarto
   // theme format so they can participate in the pipeline)
@@ -103,6 +109,7 @@ export async function revealTheme(
       (theme) => {
         const themePath = join(relative(Deno.cwd(), dirname(input)), theme);
         if (existsSync(themePath)) {
+          loadPaths.push(join(dirname(input), dirname(themePath)));
           return themeLayer(themePath);
         } else {
           // alias revealjs theme names
@@ -143,13 +150,6 @@ export async function revealTheme(
     userLayers.push(highlightingLayer);
   }
   userLayers.push(...themeLayers);
-
-  // Resolve load paths
-  const cssThemeDir = join(revealSrcDir, "css", "theme");
-  const loadPaths = [
-    join(cssThemeDir, "source"),
-    join(cssThemeDir, "template"),
-  ];
 
   // Quarto layers
   const quartoLayers = [

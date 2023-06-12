@@ -1,3 +1,21 @@
+## Fixed In This Release
+
+- Fix error when publishing a document in a subfolder ([quarto-dev/quarto#183](https://github.com/quarto-dev/quarto/issues/183)).
+- Fix error when publishing a document in a subfolder ([#5330](https://github.com/quarto-dev/quarto-cli/issues/5330)).
+- Fix duplicate bibliography when users enable `citeproc` directly. ([#5588](https://github.com/quarto-dev/quarto-cli/issues/5588)).
+- Fix issue where specificying `search: false` on an individual page would not exclude that page from the website search index.
+- Fix error when rendering document with HTML Widgets after updating to Knitr 1.43. ([#5702](https://github.com/quarto-dev/quarto-cli/issues/5702)).
+
+## Fixed In Previous Releases
+
+- Properly position margin elements ([#5289](https://github.com/quarto-dev/quarto-cli/issues/5289)).
+- Improve chrome detection for MacOS ([#2214](https://github.com/quarto-dev/quarto-cli/issues/2214)).
+- Correctly hide section numbers in responsive HTML view of books, when requested ([#5306](https://github.com/quarto-dev/quarto-cli/issues/5306)).
+- Properly handle figures within lists ([#5317](https://github.com/quarto-dev/quarto-cli/issues/5317), [#5461](https://github.com/quarto-dev/quarto-cli/issues/5461)).
+- Do not hide banner style title block when in responsive view ([#5296](https://github.com/quarto-dev/quarto-cli/issues/5296)).
+- Ensure global environment is available to LUA filters ([#5466](https://github.com/quarto-dev/quarto-cli/issues/5466)).
+- Ensure RevealJS navigation works properly even when there is a section called 'Theme' ([#5455](https://github.com/quarto-dev/quarto-cli/issues/5455)).
+
 ## Confluence Publishing
 
 - Add support for publishing both documents and projects to Atlassian Confluence spaces and as children to Confluence pages.
